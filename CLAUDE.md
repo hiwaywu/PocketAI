@@ -78,4 +78,8 @@ from drawing, so `BrowserPane` only attaches the WebView once a URL is open.
   without `x-opencode-session` (400 MissingSessionID). `ChatClient` sends the chat id there for opencode.ai
   hosts, and a `PocketAI/<version> (Android)` User-Agent everywhere. OpenCode says Go is designed for coding
   agents and monitors traffic; don't impersonate other clients.
+  OpenCode addresses: `/inference/go/v1` = Go subscription (needs the session header, models at
+  `/inference/go/v1/models`); `/inference/openai/v1` = pay-as-you-go Console balance (no session header,
+  but its `/models` is 404 — the list is at `/inference/v1/models`). Usage carries `cost` (USD) and
+  `opencode.tokens.cache_read` (read as cached tokens). Docs: https://opencode.ai/v2/docs/console/api/inference
 - Never commit API keys or the signing key.

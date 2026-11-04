@@ -1,0 +1,125 @@
+package com.pocketai.chat.data
+
+import android.content.Context
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.graphics.Matrix
+import android.net.Uri
+import android.util.Base64
+import androidx.exifinterface.media.ExifInterface
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
+import java.io.File
+import java.io.FileOutputStream
+import java.util.UUID
+import kotlin.math.max
+import kotlin.math.roundToInt
+
+@Serializable
+data class ToolEvent(
+    val id: String = UUID.randomUUID().toString(),
+    val kind: String, // "search" | "fetch"
+    val label: String,
+    val failed: Boolean = false,
+)
+
+@Serializable
+data class Source(val title: String, val url: String)
+
+@Serializable
+data class ChatMessage(
+    val id: String = UUID.randomUUID().toString(),
+    val role: String, // "user" | "assistant"
+    val text: String = "",
+    val images: List<String> = emptyList(),
+    val pageTitle: String? = null,
+    val pageUrl: String? = null,
+    val pageText: String? = null,
+    val toolEvents: List<ToolEvent> = emptyList(),
+    val sources: List<Source> = emptyList(),
+    /** Tool-call turns (OpenAI format) that led to this answer, replayed in later requests. */
+    val apiTrail: List<JsonObject> = emptyList(),
+    /** Text of the last round only; what gets sent back as this assistant turn. */
+    val finalContent: String? = null,
+    val error: String? = null,
+    val model: String? = null,
+)
+
+@Serializable
+data class Conversation(
+    val id: String = UUID.randomUUID().toString(),
+    val title: String = "New chat",
+    val messages: List<ChatMessage> = emptyList(),
+    val updatedAt: Long = System.currentTimeMillis(),
+    val promptTokens: Long = 0,
+    val completionTokens: Long = 0,
+)
+
+class ChatRepository(context: Context) {
+    private val dir = File(context.filesDir, "chats").apply { mkdirs() }
+    val imageDir = File(context.filesDir, "images").apply { mkdirs() }
+    private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
+
+    fun list(): List<Conversation> =
+        dir.listFiles { f -> f.extension == "json" }
+            ?.mapNotNull { f -> runCatching { json.decodeFromString<Conversation>(f.readText()) }.getOrNull() }
+            ?.sortedByDescending { it.updatedAt }
+            ?: emptyList()
+
+    fun save(c: Conversation) {
+        val tmp = File(dir, "${c.id}.tmp")
+        tmp.writeText(json.encodeToString(Conversation.serializer(), c))
+        tmp.renameTo(File(dir, "${c.id}.json"))
+    }
+
+    fun delete(c: Conversation) {
+        File(dir, "${c.id}.json").delete()
+        c.messages.flatMap { it.images }.forEach { File(it).delete() }
+    }
+}
+
+object ImageUtil {
+    private const val MAX_DIM = 1568
+
+    /** Copies a picked/captured photo into app storage as a downscaled, upright JPEG. */
+    fun importImage(context: Context, uri: Uri, outDir: File): File? = runCatching {
+        val cr = context.contentResolver
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        cr.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, bounds) }
+        if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
+        var sample = 1
+        while (max(bounds.outWidth, bounds.outHeight) / (sample * 2) >= MAX_DIM) sample *= 2
+        val decoded = cr.openInputStream(uri)?.use {
+            BitmapFactory.decodeStream(it, null, BitmapFactory.Options().apply { inSampleSize = sample })
+        } ?: return null
+        val rotation = runCatching { cr.openInputStream(uri)?.use { ExifInterface(it).rotationDegrees } ?: 0 }.getOrDefault(0)
+        var bmp = scaleDown(decoded, MAX_DIM)
+        if (rotation != 0) {
+            val m = Matrix().apply { postRotate(rotation.toFloat()) }
+            bmp = Bitmap.createBitmap(bmp, 0, 0, bmp.width, bmp.height, m, true)
+        }
+        val file = File(outDir, UUID.randomUUID().toString() + ".jpg")
+        FileOutputStream(file).use { bmp.compress(Bitmap.CompressFormat.JPEG, 85, it) }
+        file
+    }.getOrNull()
+
+    private fun scaleDown(b: Bitmap, maxDim: Int): Bitmap {
+        val longest = max(b.width, b.height)
+        if (longest <= maxDim) return b
+        val f = maxDim.toFloat() / longest
+        return Bitmap.createScaledBitmap(b, (b.width * f).roundToInt(), (b.height * f).roundToInt(), true)
+    }
+
+    fun toDataUrl(path: String): String? = runCatching {
+        "data:image/jpeg;base64," + Base64.encodeToString(File(path).readBytes(), Base64.NO_WRAP)
+    }.getOrNull()
+
+    fun loadBitmap(path: String, maxDim: Int): Bitmap? = runCatching {
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeFile(path, bounds)
+        var sample = 1
+        while (max(bounds.outWidth, bounds.outHeight) / (sample * 2) >= maxDim) sample *= 2
+        BitmapFactory.decodeFile(path, BitmapFactory.Options().apply { inSampleSize = sample })
+    }.getOrNull()
+}

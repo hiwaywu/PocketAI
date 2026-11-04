@@ -11,7 +11,7 @@ Owner's main provider is now NT Media (`https://api.ntmedia.store`, used ~99% of
   release key when `keystore.properties` (git-ignored: storeFile, storePassword, keyAlias, keyPassword) or
   the `POCKETAI_KEYSTORE*` env vars are present; otherwise with the debug key, which can NOT update an
   installed app. The key is never committed; the owner keeps a copy, and GitHub has it as the secrets
-  `POCKETAI_KEYSTORE_BASE64` / `POCKETAI_KEYSTORE_PASSWORD`. (1.0–1.2 used throwaway debug keys, so 1.3
+  `POCKETAI_KEYSTORE_BASE64` / `POCKETAI_KEYSTORE_PASSWORD`. (1.0–1.2 and the 1.3 test builds used throwaway debug keys, so 1.4
   needed one reinstall.)
 - Releases: bump `versionCode`/`versionName` in `app/build.gradle.kts`, write `release-notes/v<version>.md`,
   merge to `main`, then run the **Release APK** workflow (`.github/workflows/release.yml`, workflow_dispatch
@@ -78,4 +78,8 @@ from drawing, so `BrowserPane` only attaches the WebView once a URL is open.
   without `x-opencode-session` (400 MissingSessionID). `ChatClient` sends the chat id there for opencode.ai
   hosts, and a `PocketAI/<version> (Android)` User-Agent everywhere. OpenCode says Go is designed for coding
   agents and monitors traffic; don't impersonate other clients.
+  OpenCode addresses: `/inference/go/v1` = Go subscription (needs the session header, models at
+  `/inference/go/v1/models`); `/inference/openai/v1` = pay-as-you-go Console balance (no session header,
+  but its `/models` is 404 — the list is at `/inference/v1/models`). Usage carries `cost` (USD) and
+  `opencode.tokens.cache_read` (read as cached tokens). Docs: https://opencode.ai/v2/docs/console/api/inference
 - Never commit API keys or the signing key.

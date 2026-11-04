@@ -222,9 +222,14 @@ class ChatClient(private val http: OkHttpClient, private val userAgent: String) 
         )
     }
 
-    /** OpenAI reports prompt_tokens_details.cached_tokens; some proxies use cache_read_input_tokens. */
+    /**
+     * OpenAI reports prompt_tokens_details.cached_tokens; some proxies use cache_read_input_tokens;
+     * OpenCode puts it in usage.opencode.tokens.cache_read.
+     */
     private fun cachedOf(u: JsonObject): Long? =
-        (u["prompt_tokens_details"] as? JsonObject)?.long("cached_tokens") ?: u.long("cache_read_input_tokens")
+        (u["prompt_tokens_details"] as? JsonObject)?.long("cached_tokens")
+            ?: u.long("cache_read_input_tokens")
+            ?: ((u["opencode"] as? JsonObject)?.get("tokens") as? JsonObject)?.long("cache_read")
 
     private class Builder {
         var id = ""

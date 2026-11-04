@@ -43,6 +43,8 @@ import androidx.compose.material3.rememberDrawerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.foundation.layout.size
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -229,6 +231,9 @@ private fun ChatDrawer(
                     label = { Text(c.title, maxLines = 1, overflow = TextOverflow.Ellipsis) },
                     selected = c.id == state.current.id,
                     onClick = { onOpen(c.id) },
+                    icon = if (c.id in state.running) {
+                        { CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp) }
+                    } else null,
                     badge = {
                         IconButton(onClick = { confirmDelete = c.id }) { Icon(Icons.Outlined.Delete, "Delete chat") }
                     },

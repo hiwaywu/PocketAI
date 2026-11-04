@@ -92,6 +92,7 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.core.content.FileProvider
 import com.pocketai.chat.ChatViewModel
+import com.pocketai.chat.data.ModelRates
 import com.pocketai.chat.UiState
 import com.pocketai.chat.data.ChatMessage
 import com.pocketai.chat.data.ImageUtil
@@ -177,7 +178,9 @@ fun ChatScreen(
 private fun ModelPicker(state: UiState, vm: ChatViewModel, onSettings: () -> Unit) {
     val s = state.settings
     var open by remember { mutableStateOf(false) }
-    val tokens = state.current.promptTokens + state.current.completionTokens
+    val tokens = state.current.messages.sumOf { it.usage?.billed ?: 0L }
+        .takeIf { it > 0 } ?: (state.current.promptTokens + state.current.completionTokens)
+    val billedChat = state.current.messages.any { it.usage?.multiplier != null }
     Box {
         Column(Modifier.clip(RoundedCornerShape(8.dp)).clickable { open = true }.padding(horizontal = 4.dp, vertical = 2.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -191,7 +194,9 @@ private fun ModelPicker(state: UiState, vm: ChatViewModel, onSettings: () -> Uni
                 Icon(Icons.Filled.ArrowDropDown, null)
             }
             Text(
-                s.connectionName + if (tokens > 0) " · ${formatTokens(tokens)} tokens" else "",
+                s.connectionName +
+                    (ModelRates.multiplier(s.baseUrl, s.model)?.let { " · ${ModelRates.label(it)}" } ?: "") +
+                    (if (tokens > 0) " · ${formatTokens(tokens)} ${if (billedChat) "billed" else "tokens"}" else ""),
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 1,
@@ -214,8 +219,12 @@ private fun ModelPicker(state: UiState, vm: ChatViewModel, onSettings: () -> Uni
                 DropdownMenuItem(text = { Text("Load available models") }, onClick = { vm.refreshModels(); open = false })
             } else {
                 s.models.forEach { m ->
+                    val rate = ModelRates.multiplier(s.baseUrl, m)
                     DropdownMenuItem(
                         text = { Text(m, fontWeight = if (m == s.model) FontWeight.Bold else null) },
+                        trailingIcon = rate?.let { r ->
+                            { Text(ModelRates.label(r), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary) }
+                        },
                         onClick = { vm.selectModel(m); open = false },
                     )
                 }
@@ -407,7 +416,8 @@ private fun AssistantMessage(
                 }
                 m.usage?.let { u ->
                     Text(
-                        " · ${if (u.estimated) "≈" else ""}${formatTokens(u.total)} tokens",
+                        " · ${if (u.estimated) "≈" else ""}${formatTokens(u.total)} tokens" +
+                            (u.multiplier?.let { " ${ModelRates.label(it)} = ${formatTokens(u.billed)}" } ?: ""),
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.primary,
                         modifier = Modifier.clip(RoundedCornerShape(6.dp)).clickable { showUsage = true }.padding(4.dp),

@@ -6,3 +6,8 @@ local.properties
 .idea/
 .kotlin/
 mock_requests.log
+
+# Release signing key and its password: never commit
+keystore.properties
+*.jks
+*.keystore

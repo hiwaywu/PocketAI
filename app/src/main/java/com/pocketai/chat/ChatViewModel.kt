@@ -16,6 +16,7 @@ import com.pocketai.chat.data.ChatMessage
 import com.pocketai.chat.data.ChatRepository
 import com.pocketai.chat.data.Conversation
 import com.pocketai.chat.data.ImageUtil
+import com.pocketai.chat.data.ModelRates
 import com.pocketai.chat.data.ReplyUsage
 import com.pocketai.chat.data.SearchEngine
 import com.pocketai.chat.data.SettingsStore
@@ -29,6 +30,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -48,6 +50,7 @@ import kotlinx.serialization.json.putJsonArray
 import kotlinx.serialization.json.putJsonObject
 import okhttp3.OkHttpClient
 import java.io.File
+import java.io.IOException
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -59,13 +62,19 @@ data class UiState(
     val settings: AppSettings,
     val current: Conversation = Conversation(),
     val conversations: List<Conversation> = emptyList(),
-    val streaming: Boolean = false,
-    val status: String? = null,
+    /** Chats with a reply being written right now (replies keep going when you switch chats or leave the app). */
+    val running: Set<String> = emptySet(),
+    /** Progress line ("Searching: …") per running chat. */
+    val statuses: Map<String, String> = emptyMap(),
     val pendingImages: List<String> = emptyList(),
     val pendingPage: PageContext? = null,
     val notice: String? = null,
     val composerPrefill: String? = null,
-)
+) {
+    /** True while the open chat's reply is being written. */
+    val streaming: Boolean get() = current.id in running
+    val status: String? get() = statuses[current.id]
+}
 
 class ChatViewModel(private val app: Application) : AndroidViewModel(app) {
     private val http = OkHttpClient.Builder()
@@ -74,7 +83,8 @@ class ChatViewModel(private val app: Application) : AndroidViewModel(app) {
         .writeTimeout(2, TimeUnit.MINUTES)
         .followRedirects(true)
         .build()
-    private val api = ChatClient(http)
+    /** Pocket AI identifies itself honestly (OpenCode asks clients to send their own app name). */
+    private val api = ChatClient(http, "PocketAI/${BuildConfig.VERSION_NAME} (Android)")
     private val web = WebTools(http, app)
     private val repo = ChatRepository(app)
     private val store = SettingsStore(app)
@@ -85,7 +95,7 @@ class ChatViewModel(private val app: Application) : AndroidViewModel(app) {
     private val _openUrl = MutableSharedFlow<String>(extraBufferCapacity = 4)
     val openUrl = _openUrl.asSharedFlow()
 
-    private var job: Job? = null
+    private val jobs = mutableMapOf<String, Job>()
 
     init {
         viewModelScope.launch(Dispatchers.IO) {
@@ -200,7 +210,7 @@ class ChatViewModel(private val app: Application) : AndroidViewModel(app) {
                 addJsonObject { put("role", "user"); put("content", "Reply with just the word OK.") }
             }
         }
-        val r = api.streamChat(normalizeBaseUrl(baseUrl), apiKey, body, {}, {})
+        val r = api.streamChat(normalizeBaseUrl(baseUrl), apiKey, body, "test-" + java.util.UUID.randomUUID(), {}, {})
         "✅ Connected — $model replied “${r.content.trim().take(40)}”"
     } catch (e: CancellationException) {
         throw e
@@ -217,33 +227,33 @@ class ChatViewModel(private val app: Application) : AndroidViewModel(app) {
         _openUrl.tryEmit(url)
     }
 
-    /** Stops any running reply and saves it before switching chats. */
-    private fun stopForSwitch() {
-        if (state.value.streaming) {
-            job?.cancel()
-            val c = state.value.current
-            val msgs = c.messages.map { m ->
-                if (m.role == "assistant" && m.id == c.messages.lastOrNull()?.id && m.text.isBlank()) m.copy(text = "_(stopped)_") else m
-            }
-            _state.update { it.copy(current = c.copy(messages = msgs), streaming = false, status = null) }
-            persist()
+    /**
+     * Puts the open chat into the chat list before switching away. A reply still being written
+     * keeps going and keeps updating that chat in the list.
+     */
+    private fun stashCurrent() {
+        val c = state.value.current
+        if (c.messages.isEmpty()) return
+        _state.update { st ->
+            st.copy(conversations = (listOf(c) + st.conversations.filterNot { it.id == c.id }).sortedByDescending { it.updatedAt })
         }
     }
 
     fun newChat() {
-        stopForSwitch()
+        stashCurrent()
         _state.update { it.copy(current = Conversation(), pendingImages = emptyList(), pendingPage = null) }
     }
 
     fun openChat(id: String) {
-        stopForSwitch()
+        if (state.value.current.id == id) return
         val c = state.value.conversations.firstOrNull { it.id == id } ?: return
+        stashCurrent()
         _state.update { it.copy(current = c) }
     }
 
     fun deleteChat(id: String) {
-        val c = state.value.conversations.firstOrNull { it.id == id } ?: return
-        if (state.value.current.id == id) stopForSwitch()
+        jobs.remove(id)?.cancel()
+        val c = state.value.conversations.firstOrNull { it.id == id } ?: state.value.current.takeIf { it.id == id } ?: return
         viewModelScope.launch(Dispatchers.IO) { repo.delete(c) }
         _state.update { st ->
             st.copy(
@@ -323,7 +333,7 @@ class ChatViewModel(private val app: Application) : AndroidViewModel(app) {
     }
 
     fun stop() {
-        job?.cancel()
+        jobs[state.value.current.id]?.cancel()
     }
 
     fun retry() {
@@ -340,17 +350,30 @@ class ChatViewModel(private val app: Application) : AndroidViewModel(app) {
         return if (line.length > 42) line.take(40).trimEnd() + "…" else line
     }
 
+    /** Updates a chat whether it's the open one or one in the list (a reply running in the background). */
     private fun updateConv(convId: String, f: (Conversation) -> Conversation) =
-        _state.update { st -> if (st.current.id == convId) st.copy(current = f(st.current)) else st }
+        _state.update { st ->
+            if (st.current.id == convId) st.copy(current = f(st.current))
+            else {
+                val i = st.conversations.indexOfFirst { it.id == convId }
+                if (i < 0) st else st.copy(conversations = st.conversations.toMutableList().also { it[i] = f(it[i]) })
+            }
+        }
 
     private fun updateMsg(convId: String, msgId: String, f: (ChatMessage) -> ChatMessage) =
         updateConv(convId) { c -> c.copy(messages = c.messages.map { if (it.id == msgId) f(it) else it }) }
 
-    private fun setStatus(convId: String, s: String?) =
-        _state.update { st -> if (st.current.id == convId) st.copy(status = s) else st }
+    private fun statusOf(convId: String): String? = state.value.statuses[convId]
 
-    private fun persist() {
-        val c = state.value.current
+    private fun setStatus(convId: String, s: String?) =
+        _state.update { st -> st.copy(statuses = if (s == null) st.statuses - convId else st.statuses + (convId to s)) }
+
+    private fun convOf(convId: String): Conversation? =
+        state.value.let { st -> st.current.takeIf { it.id == convId } ?: st.conversations.firstOrNull { it.id == convId } }
+
+    /** Saves a chat to disk and moves it to the top of the list. */
+    private fun persist(convId: String = state.value.current.id) {
+        val c = convOf(convId) ?: return
         if (c.messages.isEmpty()) return
         _state.update { st ->
             st.copy(conversations = (listOf(c) + st.conversations.filterNot { it.id == c.id }).sortedByDescending { it.updatedAt })
@@ -367,25 +390,42 @@ class ChatViewModel(private val app: Application) : AndroidViewModel(app) {
         _state.update {
             it.copy(
                 current = conv.copy(messages = conv.messages + assistant, updatedAt = System.currentTimeMillis()),
-                streaming = true, status = null,
+                running = it.running + convId, statuses = it.statuses - convId,
             )
         }
-        persist()
-        job = viewModelScope.launch {
+        persist(convId)
+        // Keeps the app alive and online if the user leaves it before the reply is done.
+        ReplyService.start(app)
+        jobs[convId] = viewModelScope.launch {
+            var stopped = false
             try {
                 val history = withContext(Dispatchers.IO) { buildApiMessages(conv.messages, s) }
                 agentLoop(convId, assistant.id, history, s)
             } catch (e: CancellationException) {
+                stopped = true
                 updateMsg(convId, assistant.id) { if (it.text.isBlank()) it.copy(text = "_(stopped)_") else it }
                 throw e
             } catch (e: Exception) {
                 updateMsg(convId, assistant.id) { it.copy(error = e.message ?: e.toString()) }
             } finally {
-                if (state.value.current.id == convId) {
-                    _state.update { it.copy(streaming = false, status = null) }
-                    persist()
-                }
+                jobs.remove(convId)
+                _state.update { it.copy(running = it.running - convId, statuses = it.statuses - convId) }
+                persist(convId)
+                if (!stopped) announceDone(convId, assistant.id)
             }
+        }
+    }
+
+    /** Lets the user know a reply finished while they were in another app or another chat. */
+    private fun announceDone(convId: String, msgId: String) {
+        val c = convOf(convId) ?: return
+        val m = c.messages.firstOrNull { it.id == msgId } ?: return
+        val pocket = app as PocketApp
+        if (!pocket.visible) {
+            val preview = m.error ?: (m.finalContent ?: m.text).replace(Regex("""[*_#`>|]"""), "").trim().take(300)
+            ReplyService.notifyDone(app, convId, c.title, preview.ifBlank { "Reply ready" }, failed = m.error != null)
+        } else if (state.value.current.id != convId) {
+            notice(if (m.error != null) "Reply failed in “${c.title}”" else "Reply ready in “${c.title}”")
         }
     }
 
@@ -434,14 +474,7 @@ class ChatViewModel(private val app: Application) : AndroidViewModel(app) {
             if (round > 1) setStatus(convId, "Reading results…")
 
             val res: StreamResult = try {
-                api.streamChat(
-                    s.baseUrl, s.apiKey, body,
-                    onText = { t ->
-                        updateMsg(convId, msgId) { it.copy(text = it.text + t) }
-                        if (state.value.status != null) setStatus(convId, null)
-                    },
-                    onReasoning = { if (state.value.status == null) setStatus(convId, "Thinking…") },
-                )
+                streamWithRetry(convId, msgId, s, body)
             } catch (e: ApiException) {
                 val msg = e.message.orEmpty()
                 if (includeUsage && e.code in 400..422 && msg.contains("stream_options", true)) {
@@ -520,6 +553,7 @@ class ChatViewModel(private val app: Application) : AndroidViewModel(app) {
             estShared = part(estShared),
             estimated = !reported,
             seconds = ((System.currentTimeMillis() - started) / 1000).toInt(),
+            multiplier = ModelRates.multiplier(s.baseUrl, s.model),
         )
         updateMsg(convId, msgId) {
             it.copy(
@@ -529,6 +563,35 @@ class ChatViewModel(private val app: Application) : AndroidViewModel(app) {
         }
         updateConv(convId) {
             it.copy(promptTokens = it.promptTokens + usage.input, completionTokens = it.completionTokens + usage.output)
+        }
+    }
+
+    /**
+     * One streamed step. If the connection drops (Wi-Fi ↔ mobile data, a tunnel, a provider hiccup)
+     * the half-written text of this step is rolled back and the step is sent again, a few times.
+     */
+    private suspend fun streamWithRetry(convId: String, msgId: String, s: AppSettings, body: JsonObject): StreamResult {
+        val before = convOf(convId)?.messages?.firstOrNull { it.id == msgId }?.text.orEmpty()
+        var attempt = 0
+        while (true) {
+            try {
+                return api.streamChat(
+                    s.baseUrl, s.apiKey, body, convId,
+                    onText = { t ->
+                        updateMsg(convId, msgId) { it.copy(text = it.text + t) }
+                        if (statusOf(convId) != null) setStatus(convId, null)
+                    },
+                    onReasoning = { if (statusOf(convId) == null) setStatus(convId, "Thinking…") },
+                )
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                val transient = e is IOException || (e is ApiException && e.code in RETRY_HTTP_CODES)
+                if (!transient || attempt >= NET_RETRY_DELAYS.size) throw e
+                updateMsg(convId, msgId) { it.copy(text = before) }
+                setStatus(convId, "Connection lost — retrying…")
+                delay(NET_RETRY_DELAYS[attempt++])
+            }
         }
     }
 
@@ -681,5 +744,8 @@ class ChatViewModel(private val app: Application) : AndroidViewModel(app) {
         const val KEEP_MEDIA_TURNS = 4
         private const val PHOTO_TOKENS = 1200L
         private const val TOOL_DEF_TOKENS = 250
+        /** Waits before re-sending a step after the connection dropped. */
+        private val NET_RETRY_DELAYS = longArrayOf(2_000, 5_000, 10_000)
+        private val RETRY_HTTP_CODES = setOf(408, 500, 502, 503, 504, 520, 522, 524, 529)
     }
 }

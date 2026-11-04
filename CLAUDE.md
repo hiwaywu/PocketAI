@@ -11,7 +11,7 @@ Owner's main provider is now NT Media (`https://api.ntmedia.store`, used ~99% of
   release key when `keystore.properties` (git-ignored: storeFile, storePassword, keyAlias, keyPassword) or
   the `POCKETAI_KEYSTORE*` env vars are present; otherwise with the debug key, which can NOT update an
   installed app. The key is never committed; the owner keeps a copy, and GitHub has it as the secrets
-  `POCKETAI_KEYSTORE_BASE64` / `POCKETAI_KEYSTORE_PASSWORD`. (1.0–1.2 used throwaway debug keys, so 1.3
+  `POCKETAI_KEYSTORE_BASE64` / `POCKETAI_KEYSTORE_PASSWORD`. (1.0–1.2 and the 1.3 test builds used throwaway debug keys, so 1.4
   needed one reinstall.)
 - Releases: bump `versionCode`/`versionName` in `app/build.gradle.kts`, write `release-notes/v<version>.md`,
   merge to `main`, then run the **Release APK** workflow (`.github/workflows/release.yml`, workflow_dispatch

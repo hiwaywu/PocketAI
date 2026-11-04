@@ -138,7 +138,17 @@ fun SettingsScreen(vm: ChatViewModel, onClose: () -> Unit) {
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Settings") },
+                title = {
+                    Column {
+                        Text("Settings")
+                        // Shows which build is installed.
+                        Text(
+                            "Pocket AI ${com.pocketai.chat.BuildConfig.VERSION_NAME}",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                },
                 navigationIcon = { IconButton(onClick = ::attemptClose) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back") } },
                 actions = { TextButton(onClick = ::attemptClose) { Text("Done") } },
             )

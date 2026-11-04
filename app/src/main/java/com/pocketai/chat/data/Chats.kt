@@ -46,6 +46,8 @@ data class ReplyUsage(
     val estShared: Long = 0,
     /** True when the provider didn't report token counts and these are the app's estimates. */
     val estimated: Boolean = false,
+    /** How long the whole reply took, including searches and page reads. */
+    val seconds: Int = 0,
 ) {
     val total: Long get() = input + output
 }

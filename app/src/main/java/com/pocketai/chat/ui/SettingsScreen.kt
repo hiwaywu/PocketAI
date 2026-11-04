@@ -260,7 +260,14 @@ fun SettingsScreen(vm: ChatViewModel, onClose: () -> Unit) {
                         onValueChange = { searchKeys = searchKeys + (engine.name to it) },
                         label = { Text("${engine.label.substringBefore(" (")} key") },
                         supportingText = {
-                            Text(if (engine == SearchEngine.BRAVE) "Free key: brave.com/search/api" else "Free key: tavily.com")
+                            Text(
+                                when (engine) {
+                                    SearchEngine.DEEPSEEK ->
+                                        "Key from platform.deepseek.com (about $0.75 per 1,000 searches). Leave empty to use your saved DeepSeek API's key."
+                                    SearchEngine.BRAVE -> "Free key: brave.com/search/api"
+                                    else -> "Free key: tavily.com"
+                                }
+                            )
                         },
                         singleLine = true,
                         visualTransformation = PasswordVisualTransformation(),

@@ -98,6 +98,7 @@ fun UsageBreakdown(u: ReplyUsage) {
             }
         }
         val details = buildList {
+            if (u.seconds > 0) add("took ${u.seconds} s")
             add("${u.steps} step${if (u.steps == 1) "" else "s"}")
             if (u.searches > 0) add("${u.searches} search${if (u.searches == 1) "" else "es"}")
             if (u.pages > 0) add("${u.pages} page${if (u.pages == 1) "" else "s"} read")

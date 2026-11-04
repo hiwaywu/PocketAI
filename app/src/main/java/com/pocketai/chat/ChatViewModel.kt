@@ -17,6 +17,7 @@ import com.pocketai.chat.data.ChatRepository
 import com.pocketai.chat.data.Conversation
 import com.pocketai.chat.data.ImageUtil
 import com.pocketai.chat.data.ReplyUsage
+import com.pocketai.chat.data.SearchEngine
 import com.pocketai.chat.data.SettingsStore
 import com.pocketai.chat.data.Source
 import com.pocketai.chat.data.ToolEvent
@@ -412,6 +413,7 @@ class ChatViewModel(private val app: Application) : AndroidViewModel(app) {
         var estWeb = 0L
         var estPhotos = 0L
         var estShared = 0L
+        val started = System.currentTimeMillis()
 
         while (true) {
             round++
@@ -517,6 +519,7 @@ class ChatViewModel(private val app: Application) : AndroidViewModel(app) {
             estPhotos = part(estPhotos),
             estShared = part(estShared),
             estimated = !reported,
+            seconds = ((System.currentTimeMillis() - started) / 1000).toInt(),
         )
         updateMsg(convId, msgId) {
             it.copy(
@@ -538,7 +541,16 @@ class ChatViewModel(private val app: Application) : AndroidViewModel(app) {
                 updateMsg(convId, msgId) { it.copy(toolEvents = it.toolEvents + ev) }
                 setStatus(convId, "Searching: $q")
                 try {
-                    val hits = web.search(q, s.searchEngine, s.searchKey)
+                    val hits = try {
+                        web.search(q, s.searchEngine, s.searchKey)
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (e: Exception) {
+                        // Keep answering even if the chosen engine fails (no key, out of balance…).
+                        if (s.searchEngine == SearchEngine.DUCKDUCKGO) throw e
+                        notice("${s.searchEngine.label.substringBefore(" ")} search failed (${e.message?.take(80)}); used DuckDuckGo instead.")
+                        web.search(q, SearchEngine.DUCKDUCKGO, "")
+                    }
                     sources += hits.take(3).map { Source(it.title, it.url) }
                     hits.mapIndexed { i, h -> "${i + 1}. ${h.title}\nURL: ${h.url}\n${h.snippet}" }.joinToString("\n\n")
                         .ifBlank { "No results." }
@@ -555,7 +567,7 @@ class ChatViewModel(private val app: Application) : AndroidViewModel(app) {
                 updateMsg(convId, msgId) { it.copy(toolEvents = it.toolEvents + ev) }
                 setStatus(convId, "Reading ${ev.label}")
                 try {
-                    val page = web.fetch(url)
+                    val page = web.fetch(url, s.deepSeekKey.takeIf { s.searchEngine == SearchEngine.DEEPSEEK })
                     sources += Source(page.title, page.url)
                     "Title: ${page.title}\nURL: ${page.url}\n\n${page.text}"
                 } catch (e: CancellationException) {
@@ -596,6 +608,10 @@ class ChatViewModel(private val app: Application) : AndroidViewModel(app) {
         if (s.webTools) {
             system += "\nYou can use the web_search and fetch_url tools. Use them whenever a question needs current " +
                 "or specific information (news, scores, prices, schedules) or the user shares a link. " +
+                "Be quick and efficient, like a person who knows where to look: turn relative dates ('last night', " +
+                "'yesterday', 'this weekend') into exact dates using today's date; do ONE precise search first; answer " +
+                "from the search summaries when they are enough; open at most 1-3 pages, preferring official or major " +
+                "sites (e.g. ESPN, NBA.com, AP, Reuters); never repeat near-identical searches. " +
                 "When you use information from the web, cite the sources as Markdown links."
         }
         out += buildJsonObject { put("role", "system"); put("content", system) }
@@ -660,7 +676,7 @@ class ChatViewModel(private val app: Application) : AndroidViewModel(app) {
     companion object {
         const val MAX_IMAGES = 4
         const val MAX_PAGE_CHARS = 30_000
-        const val MAX_TOOL_ROUNDS = 6
+        const val MAX_TOOL_ROUNDS = 4
         /** Photos and shared pages are re-sent only for this many of the latest user messages. */
         const val KEEP_MEDIA_TURNS = 4
         private const val PHOTO_TOKENS = 1200L

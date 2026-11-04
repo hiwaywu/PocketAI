@@ -10,7 +10,7 @@ Built for the Galaxy Z Fold 7: chat and browser sit side by side when unfolded.
   switch between them from Settings or the model menu in the chat's title bar.
 - **Load models** – asks the provider which models your key can use (`GET /v1/models`) so you can pick any of them.
   Switch models any time from the chat title bar.
-- **AI web tools** – the model can call `web_search` (DuckDuckGo, or Brave/Tavily with a key) and `fetch_url`
+- **AI web tools** – the model can call `web_search` (DeepSeek Search recommended; DuckDuckGo free; Brave/Tavily) and `fetch_url`
   (reads pages; JavaScript-heavy pages are rendered in a hidden browser). Sources are shown under the answer.
 - **YouTube** – shared or pasted YouTube links are summarized from the title and description (plus captions when
   YouTube allows it). For a full summary, open the video in the Browser tab, tap *...more → Show transcript*, then

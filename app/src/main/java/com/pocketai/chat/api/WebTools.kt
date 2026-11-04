@@ -57,9 +57,10 @@ class WebTools(private val http: OkHttpClient, private val appContext: Context) 
                     put("name", "web_search")
                     put(
                         "description",
-                        "Search the web. Returns result titles, URLs and snippets. Use it for news, sports scores, " +
-                            "prices, weather, recent events, or any fact you are not sure about. Follow up with " +
-                            "fetch_url to read a promising result in full."
+                        "Search the web. Returns the top results with titles, URLs and a summary of each page. Use it for " +
+                            "news, sports scores, prices, weather, recent events, or any fact you are not sure about. " +
+                            "Write one precise query with exact dates (e.g. 'NBA scores November 3 2026'). The summaries " +
+                            "often already contain the answer; only call fetch_url if they don't."
                     )
                     putJsonObject("parameters") {
                         put("type", "object")
@@ -100,9 +101,63 @@ class WebTools(private val http: OkHttpClient, private val appContext: Context) 
         when (engine) {
             SearchEngine.BRAVE -> if (key.isBlank()) throw IOException("Brave Search needs an API key in Settings.") else brave(query, key)
             SearchEngine.TAVILY -> if (key.isBlank()) throw IOException("Tavily needs an API key in Settings.") else tavily(query, key)
+            SearchEngine.DEEPSEEK -> if (key.isBlank()) throw IOException("DeepSeek Search needs a DeepSeek API key in Settings.") else deepSeek(query, key)
             SearchEngine.DUCKDUCKGO -> duckDuckGo(query)
         }
     }
+
+    /**
+     * DeepSeek Search API (POST https://api.deepseek.com/v1/tools/search). Each result has a
+     * 600-800 character `summary` written for models, so the AI usually doesn't need to open pages.
+     * Results are ordered by DeepSeek's authority + relevance scores so big, reliable sites come first.
+     */
+    private fun deepSeek(q: String, key: String): List<SearchHit> {
+        val body = buildJsonObject {
+            put("query", q.take(128))
+            put("count", 10)
+            put("need_content", false)
+        }
+        val req = Request.Builder().url("https://api.deepseek.com/v1/tools/search")
+            .header("Authorization", "Bearer ${key.trim()}")
+            .post(body.toString().toRequestBody("application/json".toMediaType()))
+            .build()
+        http.newCall(req).execute().use { r ->
+            val raw = r.body?.string().orEmpty()
+            if (!r.isSuccessful) throw IOException("DeepSeek Search HTTP ${r.code}: ${deepSeekError(raw)}")
+            val results = json.parseToJsonElement(raw).jsonObject["results"] as? JsonArray
+            return results.orEmpty().mapNotNull { it as? JsonObject }
+                .sortedByDescending { o -> num(o, "authority") + num(o, "rerank_score") }
+                .take(6)
+                .mapNotNull { o ->
+                    val url = o.str("url") ?: return@mapNotNull null
+                    val date = o.str("date")?.take(10)?.let { " (published $it)" }.orEmpty()
+                    val site = o.str("site_name")?.let { "$it - " }.orEmpty()
+                    SearchHit(site + o.str("title").orEmpty() + date, url, o.str("summary")?.ifBlank { null } ?: o.str("snippet").orEmpty())
+                }
+        }
+    }
+
+    private fun num(o: JsonObject, key: String): Double =
+        (o[key] as? kotlinx.serialization.json.JsonPrimitive)?.content?.toDoubleOrNull() ?: 0.0
+
+    /** DeepSeek Fetch API: returns a page as Markdown, read on DeepSeek's side (fast, handles script-built sites). */
+    private fun deepSeekFetch(url: String, key: String): FetchedPage {
+        val body = buildJsonObject { put("url", url) }
+        val req = Request.Builder().url("https://api.deepseek.com/v1/tools/fetch")
+            .header("Authorization", "Bearer ${key.trim()}")
+            .post(body.toString().toRequestBody("application/json".toMediaType()))
+            .build()
+        http.newCall(req).execute().use { r ->
+            val raw = r.body?.string().orEmpty()
+            if (!r.isSuccessful) throw IOException("DeepSeek Fetch HTTP ${r.code}: ${deepSeekError(raw)}")
+            val o = json.parseToJsonElement(raw).jsonObject
+            return FetchedPage(o.str("title").orEmpty().ifBlank { url }, url, cleanText(o.str("content").orEmpty()))
+        }
+    }
+
+    private fun deepSeekError(raw: String): String = runCatching {
+        (json.parseToJsonElement(raw).jsonObject["error"] as? JsonObject)?.str("message")
+    }.getOrNull() ?: raw.take(200)
 
     private fun duckDuckGo(q: String): List<SearchHit> {
         val req = Request.Builder()
@@ -175,11 +230,15 @@ class WebTools(private val http: OkHttpClient, private val appContext: Context) 
      * Downloads a page and extracts its text. Pages built by JavaScript (live scoreboards, many
      * news sites) come back nearly empty that way, so those are re-opened in a hidden browser.
      */
-    suspend fun fetch(url: String): FetchedPage {
+    suspend fun fetch(url: String, deepSeekKey: String? = null): FetchedPage {
         youtubeId(url)?.let { id -> return withContext(Dispatchers.IO) { youtube(id, url) } }
+        if (!deepSeekKey.isNullOrBlank()) {
+            runCatching { withContext(Dispatchers.IO) { deepSeekFetch(url, deepSeekKey) } }
+                .getOrNull()?.takeIf { it.text.length >= 200 }?.let { return it }
+        }
         val fast = runCatching { withContext(Dispatchers.IO) { download(url) } }
         val page = fast.getOrNull()
-        if (page != null && page.text.length >= 800) return page
+        if (page != null && page.text.length >= 500) return page
         val rendered = render(url)
         if (rendered != null && rendered.text.length > (page?.text?.length ?: 0)) return rendered
         return page ?: throw (fast.exceptionOrNull() ?: IOException("Could not read $url"))
@@ -321,7 +380,7 @@ class WebTools(private val http: OkHttpClient, private val appContext: Context) 
     /** Loads the page in an off-screen WebView so JavaScript runs, then reads document.body.innerText. */
     @SuppressLint("SetJavaScriptEnabled")
     private suspend fun render(url: String): FetchedPage? = withContext(Dispatchers.Main) {
-        withTimeoutOrNull(25_000) {
+        withTimeoutOrNull(14_000) {
             suspendCancellableCoroutine { cont ->
                 val main = Handler(Looper.getMainLooper())
                 val wv = WebView(appContext)
@@ -348,10 +407,10 @@ class WebTools(private val http: OkHttpClient, private val appContext: Context) 
                 wv.webViewClient = object : WebViewClient() {
                     override fun onPageFinished(view: WebView?, u: String?) {
                         // Give scripts a moment to fill in the page (scores, articles).
-                        main.postDelayed({ finish() }, 3000)
+                        main.postDelayed({ finish() }, 1500)
                     }
                 }
-                main.postDelayed({ finish() }, 18_000)
+                main.postDelayed({ finish() }, 10_000)
                 cont.invokeOnCancellation { main.post { if (!finished) { finished = true; wv.destroy() } } }
                 wv.loadUrl(url)
             }

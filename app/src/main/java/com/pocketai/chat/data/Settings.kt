@@ -16,6 +16,12 @@ import javax.crypto.spec.GCMParameterSpec
 
 const val DEFAULT_SYSTEM_PROMPT =
     "You are a helpful, friendly assistant chatting with the user on their Android phone. " +
+        "Answer the question directly first, then add useful detail. Keep a natural, conversational tone, " +
+        "be concise, and use Markdown (lists, tables, bold) when it helps readability."
+
+/** The default instructions shipped in 1.0/1.1. */
+private const val OLD_DEFAULT_PROMPT =
+    "You are a helpful, friendly assistant chatting with the user on their Android phone. " +
         "Be clear and concise, and use Markdown formatting when it helps readability."
 
 /** Quick-fill addresses shown under the API address field. The user can type any address. */
@@ -31,6 +37,7 @@ val ADDRESS_SUGGESTIONS = listOf(
 
 @Serializable
 enum class SearchEngine(val label: String) {
+    DEEPSEEK("DeepSeek Search - best results (DeepSeek key)"),
     DUCKDUCKGO("DuckDuckGo (free, no key)"),
     BRAVE("Brave Search (API key)"),
     TAVILY("Tavily (API key)"),
@@ -64,7 +71,18 @@ data class AppSettings(
     val noStreamUsage: List<String> = emptyList(),
 ) {
     val activeProfile: ApiProfile? get() = profiles.firstOrNull { it.id == activeProfileId }
-    val searchKey: String get() = searchKeys[searchEngine.name].orEmpty()
+    /** Key for the chosen search engine. DeepSeek falls back to a saved DeepSeek API's key. */
+    val searchKey: String
+        get() = searchKeys[searchEngine.name].orEmpty().ifBlank {
+            if (searchEngine == SearchEngine.DEEPSEEK) deepSeekKey else ""
+        }
+
+    /** DeepSeek key: the one typed in search settings, else the current or any saved DeepSeek API's key. */
+    val deepSeekKey: String
+        get() = searchKeys[SearchEngine.DEEPSEEK.name].orEmpty().ifBlank {
+            (if (baseUrl.contains("deepseek.com", true)) apiKey else null)
+                ?: profiles.firstOrNull { it.baseUrl.contains("deepseek.com", true) }?.apiKey.orEmpty()
+        }
     val isConfigured: Boolean get() = baseUrl.isNotBlank() && apiKey.isNotBlank() && model.isNotBlank()
 
     /** Short name for the current connection, e.g. "MWAPI" or "api.openai.com". */
@@ -95,7 +113,9 @@ class SettingsStore(context: Context) {
     fun load(): AppSettings {
         val enc = prefs.getString(KEY, null) ?: return AppSettings()
         val plain = Crypto.decrypt(enc) ?: return AppSettings()
-        return runCatching { json.decodeFromString<AppSettings>(plain) }.getOrDefault(AppSettings())
+        val s = runCatching { json.decodeFromString<AppSettings>(plain) }.getOrDefault(AppSettings())
+        // Upgrade the built-in instructions from older versions; edited instructions are left alone.
+        return if (s.systemPrompt.trim() == OLD_DEFAULT_PROMPT) s.copy(systemPrompt = DEFAULT_SYSTEM_PROMPT) else s
     }
 
     fun save(settings: AppSettings) {

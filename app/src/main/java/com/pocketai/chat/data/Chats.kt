@@ -48,8 +48,12 @@ data class ReplyUsage(
     val estimated: Boolean = false,
     /** How long the whole reply took, including searches and page reads. */
     val seconds: Int = 0,
+    /** The provider's price multiplier for this model when the reply was written (NT Media), else null. */
+    val multiplier: Double? = null,
 ) {
     val total: Long get() = input + output
+    /** Tokens as the provider bills them (total × multiplier); equals [total] when there's no multiplier. */
+    val billed: Long get() = ModelRates.billed(total, multiplier)
 }
 
 @Serializable

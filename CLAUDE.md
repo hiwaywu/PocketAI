@@ -1,7 +1,8 @@
 # Pocket AI — notes for working on this project
 
 Android chatbot (Kotlin + Jetpack Compose) for any OpenAI-compatible Chat Completions API.
-Owner's main provider is MWAPI (`https://api.mwapi.dev`); target phone is a Galaxy Z Fold 7.
+Owner's main provider is now NT Media (`https://api.ntmedia.store`, used ~99% of the time; MWAPI
+`https://api.mwapi.dev` before); target phone is a Galaxy Z Fold 7.
 
 ## Build & run
 
@@ -24,6 +25,13 @@ from drawing, so `BrowserPane` only attaches the WebView once a URL is open.
 
 ## Code map (`app/src/main/java/com/pocketai/chat/`)
 
+- `PocketApp.kt` — owns the single process-wide `ChatViewModel` (not tied to the Activity), so replies
+  survive leaving the app, swiping it from Recents, and fold changes.
+- `ReplyService.kt` — `dataSync` foreground service + partial wake lock while any chat has a reply
+  running (`UiState.running`); stops itself when none do. Also posts "reply ready" notifications
+  when the app isn't visible; tapping one opens that chat (`EXTRA_OPEN_CHAT`). It must be started
+  while the app is in the foreground (Android 12+ rule), i.e. at Send.
+
 - `ChatViewModel.kt` — all state; `agentLoop` (stream → run tools → repeat, max 4 steps),
   `buildApiMessages` (what gets re-sent each turn), API profile management, share handling, usage tracking.
 - `api/ChatClient.kt` — streaming `/chat/completions` (SSE), `/models` listing, `providerEndpoint()` URL rule
@@ -31,6 +39,8 @@ from drawing, so `BrowserPane` only attaches the WebView once a URL is open.
 - `api/WebTools.kt` — `web_search` (DeepSeek Search API, DuckDuckGo HTML, Brave, Tavily) and `fetch_url`
   (DeepSeek Fetch API when DeepSeek is the engine → plain download + Jsoup → hidden-WebView render for
   script-built pages), YouTube title/description (+captions when YouTube allows).
+- `data/Rates.kt` — NT Media per-model usage multipliers (from its price list; its API doesn't expose
+  them). `ReplyUsage.multiplier`/`billed` = tokens × multiplier, shown in chat, usage dialog/screen, model menu.
 - `data/Settings.kt` — `AppSettings` (saved API profiles, search engine/keys), stored as one AES-GCM
   Android-Keystore-encrypted JSON blob. `data/Chats.kt` — chats as JSON files, `ReplyUsage`, photo import.
 - `ui/` — `AppRoot` (fold-aware: side-by-side ≥600dp, tabs when folded), `ChatScreen`, `BrowserPane`,
@@ -38,6 +48,13 @@ from drawing, so `BrowserPane` only attaches the WebView once a URL is open.
   `UsageScreen` (per-reply and overall token breakdown), `Markdown` (small renderer).
 
 ## Decisions so far
+
+- Background: replies run per chat (`ChatViewModel.jobs`), switching chats no longer stops a reply.
+  Dropped connections (IOException, 5xx, SSE ending without `[DONE]`/finish_reason) retry the step
+  after 2 s / 5 s / 10 s, rolling back that step's half-written text.
+- NT Media (tested Nov 2026): adds ~165 hidden prompt tokens to every request; reports
+  `prompt_tokens_details.cached_tokens` (prefix caching works, incl. between tool steps);
+  `reasoning_effort` is not reliably honored; no balance/usage endpoint; reasoning isn't streamed.
 
 - Token policy: don't waste, don't skimp. Chat text is always re-sent in full; raw web results only for the
   latest answer; photos/shared pages only for the last 4 user messages; system prompt has date only so

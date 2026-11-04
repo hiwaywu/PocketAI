@@ -145,11 +145,12 @@ class ChatClient(private val http: OkHttpClient) {
             var completionTokens = 0L
             var cachedTokens = 0L
             val source = body.source()
+            var done = false
             while (true) {
                 val line = source.readUtf8Line() ?: break
                 if (!line.startsWith("data:")) continue
                 val data = line.removePrefix("data:").trim()
-                if (data == "[DONE]") break
+                if (data == "[DONE]") { done = true; break }
                 if (data.isEmpty()) continue
                 val obj = runCatching { json.parseToJsonElement(data).jsonObject }.getOrNull() ?: continue
                 obj["error"]?.let { throw ApiException(resp.code, "The provider reported an error: ${errorText(it)}") }
@@ -178,6 +179,8 @@ class ChatClient(private val http: OkHttpClient) {
                     }
                 }
             }
+            // A stream cut off by a dropped connection just ends; don't mistake that for a finished reply.
+            if (!done && finish == null) throw IOException("The connection closed before the reply finished.")
             return StreamResult(
                 text.toString(),
                 calls.values.filter { it.name.isNotEmpty() }.map { ToolCall(it.id, it.name, it.args.toString()) },

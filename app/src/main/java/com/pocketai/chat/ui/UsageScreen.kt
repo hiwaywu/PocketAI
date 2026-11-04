@@ -44,6 +44,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.pocketai.chat.ChatViewModel
 import com.pocketai.chat.data.ChatMessage
 import com.pocketai.chat.data.Conversation
+import com.pocketai.chat.data.ModelRates
 import com.pocketai.chat.data.ReplyUsage
 
 private data class Part(val label: String, val tokens: Long, val color: Color)
@@ -73,6 +74,9 @@ private fun sum(list: List<ReplyUsage>) = ReplyUsage(
     estShared = list.sumOf { it.estShared },
     estimated = list.any { it.estimated },
 )
+
+/** Reply line for lists: billed tokens when the provider uses a multiplier. */
+private fun shown(u: ReplyUsage) = formatTokens(u.billed)
 
 /** Bars showing where the tokens went. */
 @Composable
@@ -118,13 +122,25 @@ fun UsageBreakdown(u: ReplyUsage) {
 fun UsageDialog(u: ReplyUsage, onDismiss: () -> Unit) {
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("This reply used ${formatTokens(u.total)} tokens") },
+        title = {
+            Text(
+                u.multiplier?.let { "This reply cost ${formatTokens(u.billed)} billed tokens" }
+                    ?: "This reply used ${formatTokens(u.total)} tokens"
+            )
+        },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Text(
                     "${formatTokens(u.input)} sent to the AI · ${formatTokens(u.output)} written by the AI",
                     style = MaterialTheme.typography.bodyMedium,
                 )
+                u.multiplier?.let { m ->
+                    Text(
+                        "NT Media bills this model at ${ModelRates.label(m)}: ${formatTokens(u.total)} tokens × $m = ${formatTokens(u.billed)}",
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.Medium,
+                    )
+                }
                 UsageBreakdown(u)
             }
         },
@@ -147,13 +163,17 @@ fun UsageScreen(vm: ChatViewModel, onOpenChat: (String) -> Unit, onClose: () -> 
         convs.flatMap { c -> c.messages.mapNotNull { m -> m.usage?.let { Costly(c, m, it) } } }
     }
     val all = remember(replies) { sum(replies.map { it.usage }) }
+    val billedAll = remember(replies) { replies.sumOf { it.usage.billed } }
+    val anyBilled = remember(replies) { replies.any { it.usage.multiplier != null } }
     val byModel = remember(replies) {
-        replies.groupBy { it.msg.model ?: "?" }.mapValues { (_, v) -> v.sumOf { it.usage.total } }.toList().sortedByDescending { it.second }
+        replies.groupBy { it.msg.model ?: "?" }
+            .map { (m, v) -> Triple(m, v.sumOf { it.usage.billed }, v.firstNotNullOfOrNull { it.usage.multiplier }) }
+            .sortedByDescending { it.second }
     }
     val byChat = remember(replies) {
-        replies.groupBy { it.conv.id }.map { (_, v) -> v.first().conv to v.sumOf { it.usage.total } }.sortedByDescending { it.second }
+        replies.groupBy { it.conv.id }.map { (_, v) -> v.first().conv to v.sumOf { it.usage.billed } }.sortedByDescending { it.second }
     }
-    val top = remember(replies) { replies.sortedByDescending { it.usage.total }.take(10) }
+    val top = remember(replies) { replies.sortedByDescending { it.usage.billed }.take(10) }
 
     Scaffold(
         topBar = {
@@ -175,7 +195,16 @@ fun UsageScreen(vm: ChatViewModel, onOpenChat: (String) -> Unit, onClose: () -> 
             }
             item {
                 Column(Modifier.widthIn(max = 640.dp).fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Text("${formatTokens(all.total)} tokens", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.SemiBold)
+                    Text(
+                        if (anyBilled) "${formatTokens(billedAll)} billed tokens" else "${formatTokens(all.total)} tokens",
+                        style = MaterialTheme.typography.headlineMedium,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                    if (anyBilled) Text(
+                        "${formatTokens(all.total)} raw tokens; NT Media replies are counted × their model's multiplier.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
                     Text(
                         "${plural(replies.size, "reply", "replies")} in ${plural(byChat.size, "chat")} · ${formatTokens(all.input)} sent · ${formatTokens(all.output)} written",
                         style = MaterialTheme.typography.bodyMedium,
@@ -208,7 +237,7 @@ fun UsageScreen(vm: ChatViewModel, onOpenChat: (String) -> Unit, onClose: () -> 
                                     overflow = TextOverflow.Ellipsis,
                                 )
                             }
-                            Text(formatTokens(r.usage.total), fontWeight = FontWeight.SemiBold)
+                            Text(shown(r.usage), fontWeight = FontWeight.SemiBold)
                         }
                     }
                 }
@@ -225,9 +254,9 @@ fun UsageScreen(vm: ChatViewModel, onOpenChat: (String) -> Unit, onClose: () -> 
             }
             item {
                 Section("By model") {
-                    byModel.forEach { (m, t) ->
+                    byModel.forEach { (m, t, rate) ->
                         Row(Modifier.fillMaxWidth().padding(vertical = 6.dp)) {
-                            Text(m, Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
+                            Text(m + (rate?.let { "  ${ModelRates.label(it)}" } ?: ""), Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
                             Text(formatTokens(t), style = MaterialTheme.typography.bodyMedium)
                         }
                     }

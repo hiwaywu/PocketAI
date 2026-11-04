@@ -1,13 +1,15 @@
 package com.pocketai.chat
 
+import android.Manifest
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
-import androidx.activity.viewModels
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -16,12 +18,16 @@ import com.pocketai.chat.ui.AppRoot
 import com.pocketai.chat.ui.AppTheme
 
 class MainActivity : ComponentActivity() {
-    private val vm: ChatViewModel by viewModels()
+    /** Lives for the whole process (see [PocketApp]) so leaving the app never stops a reply. */
+    private val vm: ChatViewModel get() = (application as PocketApp).chat
+
+    private val askNotifications = registerForActivityResult(ActivityResultContracts.RequestPermission()) {}
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
-        if (savedInstanceState == null) handleShare(intent)
+        if (savedInstanceState == null) handleIntent(intent)
+        askForNotificationsOnce()
         setContent {
             AppTheme {
                 Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
@@ -31,13 +37,42 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    override fun onNewIntent(intent: Intent) {
-        super.onNewIntent(intent)
-        handleShare(intent)
+    override fun onStart() {
+        super.onStart()
+        (application as PocketApp).visible = true
+        ReplyService.clearDone(this)
     }
 
-    private fun handleShare(intent: Intent?) {
+    override fun onStop() {
+        (application as PocketApp).visible = false
+        super.onStop()
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        handleIntent(intent)
+    }
+
+    /**
+     * Android 13+ needs permission for the "replying…" / "reply ready" notifications.
+     * Asked once; replies keep running in the background either way.
+     */
+    private fun askForNotificationsOnce() {
+        if (Build.VERSION.SDK_INT < 33) return
+        if (checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED) return
+        val prefs = getSharedPreferences("ui", MODE_PRIVATE)
+        if (prefs.getBoolean("askedNotifications", false)) return
+        prefs.edit().putBoolean("askedNotifications", true).apply()
+        askNotifications.launch(Manifest.permission.POST_NOTIFICATIONS)
+    }
+
+    private fun handleIntent(intent: Intent?) {
         intent ?: return
+        intent.getStringExtra(ReplyService.EXTRA_OPEN_CHAT)?.let { id ->
+            vm.openChat(id)
+            setIntent(Intent(this, MainActivity::class.java))
+            return
+        }
         val action = intent.action
         if (action != Intent.ACTION_SEND && action != Intent.ACTION_SEND_MULTIPLE) return
         val text = intent.getStringExtra(Intent.EXTRA_TEXT)

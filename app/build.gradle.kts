@@ -1,3 +1,5 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
@@ -17,11 +19,29 @@ android {
         versionName = "1.3"
     }
 
+    // One permanent release key so every build can install over the previous version without losing
+    // chats. The key is never committed: it comes from keystore.properties (git-ignored, local builds)
+    // or from environment variables (the GitHub release workflow, filled from repository secrets).
+    val signing = Properties().apply {
+        rootProject.file("keystore.properties").takeIf { it.exists() }?.inputStream()?.use { load(it) }
+    }
+    fun signingValue(key: String, env: String): String? = signing.getProperty(key) ?: System.getenv(env)
+    val keystorePath = signingValue("storeFile", "POCKETAI_KEYSTORE")
+    signingConfigs {
+        if (keystorePath != null) create("pocketai") {
+            storeFile = file(keystorePath)
+            storePassword = signingValue("storePassword", "POCKETAI_KEYSTORE_PASSWORD")
+            keyAlias = signingValue("keyAlias", "POCKETAI_KEY_ALIAS") ?: "pocketai"
+            keyPassword = signingValue("keyPassword", "POCKETAI_KEY_PASSWORD") ?: storePassword
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = false
-            // Signed with the local debug key so the APK can be sideloaded directly.
-            signingConfig = signingConfigs.getByName("debug")
+            // Without the release key (e.g. a fresh checkout) fall back to the debug key; such an APK
+            // can't update an installed Pocket AI, so real releases must use the release key.
+            signingConfig = signingConfigs.findByName("pocketai") ?: signingConfigs.getByName("debug")
         }
     }
     compileOptions {
@@ -33,6 +53,7 @@ android {
     }
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 }
 

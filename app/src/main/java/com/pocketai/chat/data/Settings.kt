@@ -28,6 +28,7 @@ private const val OLD_DEFAULT_PROMPT =
 val ADDRESS_SUGGESTIONS = listOf(
     "MWAPI" to "https://api.mwapi.dev",
     "NT Media" to "https://api.ntmedia.store",
+    "OpenCode Go" to "https://opencode.ai/inference/go/v1",
     "OpenAI" to "https://api.openai.com/v1",
     "Gemini" to "https://generativelanguage.googleapis.com/v1beta/openai",
     "OpenRouter" to "https://openrouter.ai/api/v1",

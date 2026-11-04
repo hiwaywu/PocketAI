@@ -83,7 +83,8 @@ class ChatViewModel(private val app: Application) : AndroidViewModel(app) {
         .writeTimeout(2, TimeUnit.MINUTES)
         .followRedirects(true)
         .build()
-    private val api = ChatClient(http)
+    /** Pocket AI identifies itself honestly (OpenCode asks clients to send their own app name). */
+    private val api = ChatClient(http, "PocketAI/${BuildConfig.VERSION_NAME} (Android)")
     private val web = WebTools(http, app)
     private val repo = ChatRepository(app)
     private val store = SettingsStore(app)
@@ -209,7 +210,7 @@ class ChatViewModel(private val app: Application) : AndroidViewModel(app) {
                 addJsonObject { put("role", "user"); put("content", "Reply with just the word OK.") }
             }
         }
-        val r = api.streamChat(normalizeBaseUrl(baseUrl), apiKey, body, {}, {})
+        val r = api.streamChat(normalizeBaseUrl(baseUrl), apiKey, body, "test-" + java.util.UUID.randomUUID(), {}, {})
         "✅ Connected — $model replied “${r.content.trim().take(40)}”"
     } catch (e: CancellationException) {
         throw e
@@ -575,7 +576,7 @@ class ChatViewModel(private val app: Application) : AndroidViewModel(app) {
         while (true) {
             try {
                 return api.streamChat(
-                    s.baseUrl, s.apiKey, body,
+                    s.baseUrl, s.apiKey, body, convId,
                     onText = { t ->
                         updateMsg(convId, msgId) { it.copy(text = it.text + t) }
                         if (statusOf(convId) != null) setStatus(convId, null)

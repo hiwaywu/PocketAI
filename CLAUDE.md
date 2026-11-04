@@ -7,10 +7,15 @@ Owner's main provider is now NT Media (`https://api.ntmedia.store`, used ~99% of
 ## Build & run
 
 - Needs JDK 17 and Android SDK platform 35 (`local.properties` → `sdk.dir=...`, not committed).
-- `./gradlew assembleRelease` → `app/build/outputs/apk/release/app-release.apk` (signed with the local debug key).
-- Releases: copy the APK to `release/PocketAI-<version>.apk` (git-ignored) and
-  `gh release create v<version> release/PocketAI-<version>.apk --repo hiwaywu/PocketAI`.
-- Bump `versionCode`/`versionName` in `app/build.gradle.kts` for each release.
+- `./gradlew assembleRelease` → `app/build/outputs/apk/release/app-release.apk`. Signed with the permanent
+  release key when `keystore.properties` (git-ignored: storeFile, storePassword, keyAlias, keyPassword) or
+  the `POCKETAI_KEYSTORE*` env vars are present; otherwise with the debug key, which can NOT update an
+  installed app. The key is never committed; the owner keeps a copy, and GitHub has it as the secrets
+  `POCKETAI_KEYSTORE_BASE64` / `POCKETAI_KEYSTORE_PASSWORD`. (1.0–1.2 used throwaway debug keys, so 1.3
+  needed one reinstall.)
+- Releases: bump `versionCode`/`versionName` in `app/build.gradle.kts`, write `release-notes/v<version>.md`,
+  merge to `main`, then run the **Release APK** workflow (`.github/workflows/release.yml`, workflow_dispatch
+  with input `version`). It builds the APK with the release key and creates the GitHub release.
 
 ## Testing without spending tokens
 
@@ -69,4 +74,8 @@ from drawing, so `BrowserPane` only attaches the WebView once a URL is open.
   (`/v1/messages`) — a possible addition, which would also allow Claude's server-side web search via MWAPI.
 - YouTube caption downloads are blocked by YouTube; don't try to impersonate YouTube app clients.
   The workaround is the in-app browser: *...more → Show transcript* → *Summarize page*.
-- Never commit API keys.
+- OpenCode Go (`https://opencode.ai/inference/go/v1`; old `/zen/go/v1` also answers) rejects requests
+  without `x-opencode-session` (400 MissingSessionID). `ChatClient` sends the chat id there for opencode.ai
+  hosts, and a `PocketAI/<version> (Android)` User-Agent everywhere. OpenCode says Go is designed for coding
+  agents and monitors traffic; don't impersonate other clients.
+- Never commit API keys or the signing key.

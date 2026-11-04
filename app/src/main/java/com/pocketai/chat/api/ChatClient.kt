@@ -57,8 +57,12 @@ fun providerEndpoint(baseUrl: String, path: String): String {
     return "$base/v1$path"
 }
 
+/** True for OpenCode Zen / Go, which route and cache by an `x-opencode-session` header. */
+fun isOpenCode(baseUrl: String): Boolean =
+    baseUrl.toHttpUrlOrNull()?.host?.lowercase()?.let { it == "opencode.ai" || it.endsWith(".opencode.ai") } == true
+
 /** Client for any OpenAI-compatible Chat Completions API (MWAPI, OpenAI, Gemini, OpenRouter, …). */
-class ChatClient(private val http: OkHttpClient) {
+class ChatClient(private val http: OkHttpClient, private val userAgent: String) {
     private val json = Json { ignoreUnknownKeys = true }
     private val jsonType = "application/json".toMediaType()
 
@@ -73,6 +77,7 @@ class ChatClient(private val http: OkHttpClient) {
         val request = Request.Builder()
             .url(checkedUrl(providerEndpoint(baseUrl, "/models")))
             .header("Accept", "application/json")
+            .header("User-Agent", userAgent)
             .header("Authorization", "Bearer ${apiKey.trim()}")
             .header("x-api-key", apiKey.trim())
             .header("anthropic-version", "2023-06-01")
@@ -99,18 +104,25 @@ class ChatClient(private val http: OkHttpClient) {
         }
     }
 
-    /** Streams one chat completion. [onText] receives visible text as it arrives. */
+    /**
+     * Streams one chat completion. [onText] receives visible text as it arrives.
+     * [sessionId] (the chat's id) is sent as `x-opencode-session` to OpenCode, which requires a
+     * stable id per conversation for routing and prompt caching.
+     */
     suspend fun streamChat(
         baseUrl: String,
         apiKey: String,
         body: JsonObject,
+        sessionId: String,
         onText: (String) -> Unit,
         onReasoning: () -> Unit,
     ): StreamResult = withContext(Dispatchers.IO) {
         val request = Request.Builder()
             .url(checkedUrl(providerEndpoint(baseUrl, "/chat/completions")))
+            .header("User-Agent", userAgent)
             .header("Authorization", "Bearer ${apiKey.trim()}")
             .header("Accept", "text/event-stream, application/json")
+            .apply { if (isOpenCode(baseUrl)) header("x-opencode-session", sessionId) }
             .post(body.toString().toRequestBody(jsonType))
             .build()
         val call = http.newCall(request)

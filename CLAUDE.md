@@ -14,6 +14,9 @@ Owner's main provider is now NT Media (`https://api.ntmedia.store`, used ~99% of
 
 ## Testing without spending tokens
 
+When a test must hit the real NT Media API, use **`deepseek-v4-flash`** (×1) only — never `deepseek-v4-pro`
+or other pricier models — and keep the key out of the repo (put it in a scratch file / env var).
+
 `tools/mock_api.py` is a fake OpenAI-compatible API (`python tools/mock_api.py`, port 8765).
 In the emulator use API address `http://10.0.2.2:8765`, any key, then *Load models*.
 Asking anything containing "nba" makes the mock request a `web_search`, so the full tool loop

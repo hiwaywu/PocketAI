@@ -18,6 +18,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Chat
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.BarChart
 import androidx.compose.material.icons.filled.Public
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.outlined.Delete
@@ -77,6 +78,7 @@ fun AppRoot(vm: ChatViewModel) {
     var tab by rememberSaveable { mutableStateOf(Tab.CHAT) }
     var showSettings by rememberSaveable { mutableStateOf(!state.settings.isConfigured && state.settings.profiles.isEmpty()) }
     var browserPane by rememberSaveable { mutableStateOf(true) }
+    var showUsage by rememberSaveable { mutableStateOf(false) }
     val wide = LocalConfiguration.current.screenWidthDp >= 600
     val wideNow by rememberUpdatedState(wide)
     val drawerState = rememberDrawerState(DrawerValue.Closed)
@@ -109,6 +111,10 @@ fun AppRoot(vm: ChatViewModel) {
         SettingsScreen(vm, onClose = { showSettings = false })
         return
     }
+    if (showUsage) {
+        UsageScreen(vm, onOpenChat = { vm.openChat(it); tab = Tab.CHAT; showUsage = false }, onClose = { showUsage = false })
+        return
+    }
 
     BackHandler(drawerState.isOpen) { scope.launch { drawerState.close() } }
     BackHandler(!wide && tab == Tab.BROWSER && !browser.canGoBack) { tab = Tab.CHAT }
@@ -123,6 +129,7 @@ fun AppRoot(vm: ChatViewModel) {
                 onOpen = { vm.openChat(it); tab = Tab.CHAT; scope.launch { drawerState.close() } },
                 onDelete = vm::deleteChat,
                 onSettings = { showSettings = true; scope.launch { drawerState.close() } },
+                onUsage = { showUsage = true; scope.launch { drawerState.close() } },
             )
         },
     ) {
@@ -194,6 +201,7 @@ private fun ChatDrawer(
     onOpen: (String) -> Unit,
     onDelete: (String) -> Unit,
     onSettings: () -> Unit,
+    onUsage: () -> Unit,
 ) {
     var confirmDelete by remember { mutableStateOf<String?>(null) }
     ModalDrawerSheet(Modifier.widthIn(max = 320.dp)) {
@@ -229,6 +237,13 @@ private fun ChatDrawer(
             }
         }
         HorizontalDivider()
+        NavigationDrawerItem(
+            label = { Text("Token usage") },
+            icon = { Icon(Icons.Filled.BarChart, null) },
+            selected = false,
+            onClick = onUsage,
+            modifier = Modifier.padding(horizontal = 12.dp).padding(top = 8.dp),
+        )
         NavigationDrawerItem(
             label = { Text("Settings") },
             icon = { Icon(Icons.Filled.Settings, null) },

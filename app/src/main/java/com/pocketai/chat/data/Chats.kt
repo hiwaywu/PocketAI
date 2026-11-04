@@ -27,6 +27,29 @@ data class ToolEvent(
 @Serializable
 data class Source(val title: String, val url: String)
 
+/**
+ * What one AI reply cost. Input/output/cached come from the provider; the four est* fields are
+ * the app's estimate of how the input tokens split between chat history, web results, photos
+ * and pages shared from the browser (scaled so they add up to the real input total).
+ */
+@Serializable
+data class ReplyUsage(
+    val input: Long = 0,
+    val output: Long = 0,
+    val cached: Long = 0,
+    val steps: Int = 1,
+    val searches: Int = 0,
+    val pages: Int = 0,
+    val estHistory: Long = 0,
+    val estWeb: Long = 0,
+    val estPhotos: Long = 0,
+    val estShared: Long = 0,
+    /** True when the provider didn't report token counts and these are the app's estimates. */
+    val estimated: Boolean = false,
+) {
+    val total: Long get() = input + output
+}
+
 @Serializable
 data class ChatMessage(
     val id: String = UUID.randomUUID().toString(),
@@ -44,6 +67,7 @@ data class ChatMessage(
     val finalContent: String? = null,
     val error: String? = null,
     val model: String? = null,
+    val usage: ReplyUsage? = null,
 )
 
 @Serializable

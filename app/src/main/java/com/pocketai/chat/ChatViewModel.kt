@@ -16,6 +16,7 @@ import com.pocketai.chat.data.ChatMessage
 import com.pocketai.chat.data.ChatRepository
 import com.pocketai.chat.data.Conversation
 import com.pocketai.chat.data.ImageUtil
+import com.pocketai.chat.data.ReplyUsage
 import com.pocketai.chat.data.SettingsStore
 import com.pocketai.chat.data.Source
 import com.pocketai.chat.data.ToolEvent
@@ -390,16 +391,27 @@ class ChatViewModel(private val app: Application) : AndroidViewModel(app) {
     /**
      * Sends the chat to the model. If the model asks to search or read a page, the app runs that
      * tool, sends the result back, and asks again — until the model writes its final answer.
+     * Each step re-sends the conversation, so the usage of every step is added up.
      */
-    private suspend fun agentLoop(convId: String, msgId: String, history: List<JsonObject>, s: AppSettings) {
+    private suspend fun agentLoop(convId: String, msgId: String, history: BuiltHistory, s: AppSettings) {
         val trail = mutableListOf<JsonObject>()
         val sources = mutableListOf<Source>()
         var useTools = s.webTools
         var includeUsage = s.baseUrl !in s.noStreamUsage
         var round = 0
         var finalContent = ""
-        var promptTokens = 0L
-        var completionTokens = 0L
+        var input = 0L
+        var output = 0L
+        var cached = 0L
+        var outputChars = 0L
+        var searches = 0
+        var pages = 0
+        // Rough per-step estimate (about 4 characters per token, about 1,200 tokens per photo)
+        // of what each step's input was made of.
+        var estHistory = 0L
+        var estWeb = 0L
+        var estPhotos = 0L
+        var estShared = 0L
 
         while (true) {
             round++
@@ -409,7 +421,7 @@ class ChatViewModel(private val app: Application) : AndroidViewModel(app) {
                 put("stream", true)
                 if (includeUsage) putJsonObject("stream_options") { put("include_usage", true) }
                 putJsonArray("messages") {
-                    history.forEach { add(it) }
+                    history.messages.forEach { add(it) }
                     trail.forEach { add(it) }
                 }
                 if (allowTools) put("tools", WebTools.TOOL_DEFS)
@@ -445,8 +457,14 @@ class ChatViewModel(private val app: Application) : AndroidViewModel(app) {
                 }
                 throw e
             }
-            promptTokens += res.promptTokens
-            completionTokens += res.completionTokens
+            input += res.promptTokens
+            output += res.completionTokens
+            cached += res.cachedTokens
+            outputChars += res.content.length + res.toolCalls.sumOf { it.arguments.length }
+            estHistory += history.textChars / 4 + (if (allowTools) TOOL_DEF_TOKENS else 0)
+            estShared += history.sharedChars / 4
+            estPhotos += history.images * PHOTO_TOKENS
+            estWeb += (history.webChars + trail.sumOf { it.toString().length }) / 4
 
             if (res.toolCalls.isEmpty() || !allowTools) {
                 finalContent = res.content
@@ -454,6 +472,8 @@ class ChatViewModel(private val app: Application) : AndroidViewModel(app) {
             }
 
             val calls = res.toolCalls.mapIndexed { i, tc -> if (tc.id.isBlank()) tc.copy(id = "call_${round}_$i") else tc }
+            searches += calls.count { it.name == "web_search" }
+            pages += calls.count { it.name == "fetch_url" }
             trail += buildJsonObject {
                 put("role", "assistant")
                 if (res.content.isNotEmpty()) put("content", res.content) else put("content", JsonNull)
@@ -480,11 +500,32 @@ class ChatViewModel(private val app: Application) : AndroidViewModel(app) {
             }
         }
 
+        // Scale the estimate so the parts add up to what the provider actually billed.
+        val estTotal = (estHistory + estWeb + estPhotos + estShared).coerceAtLeast(1)
+        val reported = input > 0
+        val realInput = if (reported) input else estTotal
+        fun part(x: Long) = x * realInput / estTotal
+        val usage = ReplyUsage(
+            input = realInput,
+            output = if (output > 0) output else outputChars / 4,
+            cached = cached,
+            steps = round,
+            searches = searches,
+            pages = pages,
+            estHistory = part(estHistory),
+            estWeb = part(estWeb),
+            estPhotos = part(estPhotos),
+            estShared = part(estShared),
+            estimated = !reported,
+        )
         updateMsg(convId, msgId) {
-            it.copy(apiTrail = trail.toList(), finalContent = finalContent, sources = sources.distinctBy { src -> src.url }.take(12))
+            it.copy(
+                apiTrail = trail.toList(), finalContent = finalContent, usage = usage,
+                sources = sources.distinctBy { src -> src.url }.take(12),
+            )
         }
         updateConv(convId) {
-            it.copy(promptTokens = it.promptTokens + promptTokens, completionTokens = it.completionTokens + completionTokens)
+            it.copy(promptTokens = it.promptTokens + usage.input, completionTokens = it.completionTokens + usage.output)
         }
     }
 
@@ -531,53 +572,98 @@ class ChatViewModel(private val app: Application) : AndroidViewModel(app) {
     private fun markFailed(convId: String, msgId: String, evId: String) =
         updateMsg(convId, msgId) { m -> m.copy(toolEvents = m.toolEvents.map { if (it.id == evId) it.copy(failed = true) else it }) }
 
-    private fun buildApiMessages(msgs: List<ChatMessage>, s: AppSettings): List<JsonObject> {
+    /** The request history plus character counts used for the usage breakdown. */
+    private class BuiltHistory(val messages: List<JsonObject>, val textChars: Int, val sharedChars: Int, val webChars: Int, val images: Int)
+
+    /**
+     * Builds the messages sent to the API. All chat text is always included, so the chat keeps its
+     * memory. To avoid paying for the same bulky content again and again:
+     *  - photos and shared browser pages are only re-sent for the last [KEEP_MEDIA_TURNS] user messages;
+     *  - raw web pages and search results are only re-sent for the latest answer
+     *    (older answers keep their text plus the source links).
+     * The system prompt has the date only (no clock time) so it stays identical between messages,
+     * which lets providers that cache repeated input bill it cheaper.
+     */
+    private fun buildApiMessages(msgs: List<ChatMessage>, s: AppSettings): BuiltHistory {
         val out = mutableListOf<JsonObject>()
-        val now = SimpleDateFormat("EEEE, MMMM d, yyyy 'at' h:mm a z", Locale.US).format(Date())
-        var system = s.systemPrompt.trim() + "\n\nThe current date and time is $now."
+        var textChars = 0
+        var sharedChars = 0
+        var webChars = 0
+        var images = 0
+        val today = SimpleDateFormat("EEEE, MMMM d, yyyy", Locale.US).format(Date())
+        val zone = java.util.TimeZone.getDefault().id
+        var system = s.systemPrompt.trim() + "\n\nToday's date is $today (the user's time zone is $zone)."
         if (s.webTools) {
             system += "\nYou can use the web_search and fetch_url tools. Use them whenever a question needs current " +
                 "or specific information (news, scores, prices, schedules) or the user shares a link. " +
                 "When you use information from the web, cite the sources as Markdown links."
         }
         out += buildJsonObject { put("role", "system"); put("content", system) }
+        textChars += system.length
 
-        for (m in msgs) {
+        val userIdx = msgs.indices.filter { msgs[it].role == "user" }
+        val mediaFrom = userIdx.takeLast(KEEP_MEDIA_TURNS).firstOrNull() ?: 0
+        val lastAssistant = msgs.indexOfLast { it.role == "assistant" && (it.text.isNotBlank() || it.apiTrail.isNotEmpty()) }
+
+        msgs.forEachIndexed { i, m ->
             when (m.role) {
                 "user" -> {
-                    val text = buildString {
-                        if (m.pageText != null) {
-                            append("[The user is sharing a web page from the in-app browser]\n")
-                            append("Title: ${m.pageTitle}\nURL: ${m.pageUrl}\n<page_content>\n${m.pageText}\n</page_content>\n\n")
+                    val keepMedia = i >= mediaFrom
+                    val shared = StringBuilder()
+                    val note = StringBuilder()
+                    if (m.pageText != null) {
+                        if (keepMedia) {
+                            shared.append("[The user is sharing a web page from the in-app browser]\n")
+                            shared.append("Title: ${m.pageTitle}\nURL: ${m.pageUrl}\n<page_content>\n${m.pageText}\n</page_content>\n\n")
+                        } else {
+                            note.append("[Earlier the user shared the page \"${m.pageTitle}\" (${m.pageUrl}); its text isn't re-sent.]\n")
                         }
-                        append(m.text.ifBlank { if (m.images.isNotEmpty()) "(see the attached photo)" else "" })
                     }
-                    val images = m.images.mapNotNull { ImageUtil.toDataUrl(it) }
+                    if (m.images.isNotEmpty() && !keepMedia) {
+                        note.append("[The user shared ${m.images.size} photo(s) here earlier; they aren't re-sent.]\n")
+                    }
+                    val body = m.text.ifBlank { if (m.images.isNotEmpty()) "(see the attached photo)" else "" }
+                    val text = shared.toString() + note.toString() + body
+                    sharedChars += shared.length
+                    textChars += note.length + body.length
+                    val photos = if (keepMedia) m.images.mapNotNull { ImageUtil.toDataUrl(it) } else emptyList()
+                    images += photos.size
                     out += buildJsonObject {
                         put("role", "user")
-                        if (images.isEmpty()) put("content", text)
+                        if (photos.isEmpty()) put("content", text)
                         else putJsonArray("content") {
                             addJsonObject { put("type", "text"); put("text", text) }
-                            images.forEach { url ->
+                            photos.forEach { url ->
                                 addJsonObject { put("type", "image_url"); putJsonObject("image_url") { put("url", url) } }
                             }
                         }
                     }
                 }
                 "assistant" -> {
-                    if (m.text.isBlank() && m.apiTrail.isEmpty()) continue
-                    out.addAll(m.apiTrail)
-                    val content = (m.finalContent ?: m.text).ifBlank { "(no reply)" }
+                    if (m.text.isBlank() && m.apiTrail.isEmpty()) return@forEachIndexed
+                    var content = (m.finalContent ?: m.text).ifBlank { "(no reply)" }
+                    if (i == lastAssistant && m.apiTrail.isNotEmpty()) {
+                        out.addAll(m.apiTrail)
+                        // Re-sent web results count as "web" in the breakdown.
+                        webChars += m.apiTrail.sumOf { it.toString().length }
+                    } else if (m.sources.isNotEmpty()) {
+                        content += "\n\n(Sources used: " + m.sources.joinToString(", ") { it.url } + ")"
+                    }
+                    textChars += content.length
                     out += buildJsonObject { put("role", "assistant"); put("content", content) }
                 }
             }
         }
-        return out
+        return BuiltHistory(out, textChars, sharedChars, webChars, images)
     }
 
     companion object {
         const val MAX_IMAGES = 4
         const val MAX_PAGE_CHARS = 30_000
         const val MAX_TOOL_ROUNDS = 6
+        /** Photos and shared pages are re-sent only for this many of the latest user messages. */
+        const val KEEP_MEDIA_TURNS = 4
+        private const val PHOTO_TOKENS = 1200L
+        private const val TOOL_DEF_TOKENS = 250
     }
 }

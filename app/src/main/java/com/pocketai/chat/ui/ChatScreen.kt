@@ -345,6 +345,7 @@ private fun AssistantMessage(
     modifier: Modifier,
 ) {
     val clipboard = LocalClipboardManager.current
+    var showUsage by remember { mutableStateOf(false) }
     Column(modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         if (m.toolEvents.isNotEmpty()) {
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) { m.toolEvents.forEach { ToolEventRow(it) } }
@@ -404,7 +405,16 @@ private fun AssistantMessage(
                 m.model?.let {
                     Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline)
                 }
+                m.usage?.let { u ->
+                    Text(
+                        " · ${if (u.estimated) "≈" else ""}${formatTokens(u.total)} tokens",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.clip(RoundedCornerShape(6.dp)).clickable { showUsage = true }.padding(4.dp),
+                    )
+                }
             }
+            if (showUsage) m.usage?.let { UsageDialog(it) { showUsage = false } }
         }
     }
 }

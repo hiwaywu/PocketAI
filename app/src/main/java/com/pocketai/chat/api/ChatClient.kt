@@ -33,6 +33,8 @@ data class StreamResult(
     val finishReason: String?,
     val promptTokens: Long,
     val completionTokens: Long,
+    /** Input tokens the provider served from its cache (billed cheaper), when reported. */
+    val cachedTokens: Long = 0,
 )
 
 fun JsonObject.str(key: String): String? =
@@ -141,6 +143,7 @@ class ChatClient(private val http: OkHttpClient) {
             var finish: String? = null
             var promptTokens = 0L
             var completionTokens = 0L
+            var cachedTokens = 0L
             val source = body.source()
             while (true) {
                 val line = source.readUtf8Line() ?: break
@@ -153,6 +156,7 @@ class ChatClient(private val http: OkHttpClient) {
                 (obj["usage"] as? JsonObject)?.let { u ->
                     promptTokens = u.long("prompt_tokens") ?: promptTokens
                     completionTokens = u.long("completion_tokens") ?: completionTokens
+                    cachedTokens = cachedOf(u) ?: cachedTokens
                 }
                 val choice = (obj["choices"] as? JsonArray)?.firstOrNull() as? JsonObject ?: continue
                 choice.str("finish_reason")?.let { finish = it }
@@ -177,7 +181,7 @@ class ChatClient(private val http: OkHttpClient) {
             return StreamResult(
                 text.toString(),
                 calls.values.filter { it.name.isNotEmpty() }.map { ToolCall(it.id, it.name, it.args.toString()) },
-                finish, promptTokens, completionTokens,
+                finish, promptTokens, completionTokens, cachedTokens,
             )
         }
     }
@@ -197,8 +201,15 @@ class ChatClient(private val http: OkHttpClient) {
             ToolCall(tc.str("id").orEmpty(), f.str("name").orEmpty(), f.str("arguments") ?: f["arguments"]?.toString().orEmpty())
         }.orEmpty()
         val usage = obj["usage"] as? JsonObject
-        return StreamResult(content, calls, choice?.str("finish_reason"), usage?.long("prompt_tokens") ?: 0, usage?.long("completion_tokens") ?: 0)
+        return StreamResult(
+            content, calls, choice?.str("finish_reason"),
+            usage?.long("prompt_tokens") ?: 0, usage?.long("completion_tokens") ?: 0, usage?.let { cachedOf(it) } ?: 0,
+        )
     }
+
+    /** OpenAI reports prompt_tokens_details.cached_tokens; some proxies use cache_read_input_tokens. */
+    private fun cachedOf(u: JsonObject): Long? =
+        (u["prompt_tokens_details"] as? JsonObject)?.long("cached_tokens") ?: u.long("cache_read_input_tokens")
 
     private class Builder {
         var id = ""

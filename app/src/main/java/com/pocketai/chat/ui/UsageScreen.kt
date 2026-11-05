@@ -52,8 +52,6 @@ import com.pocketai.chat.data.ChatMessage
 import com.pocketai.chat.data.Conversation
 import com.pocketai.chat.data.ApiProfile
 import com.pocketai.chat.data.ModelRates
-import com.pocketai.chat.data.hostOf
-import com.pocketai.chat.data.keyHint
 import com.pocketai.chat.data.ReplyUsage
 
 private data class Part(val label: String, val tokens: Long, val color: Color)
@@ -159,16 +157,11 @@ fun UsageDialog(u: ReplyUsage, onDismiss: () -> Unit) {
 
 private data class KeyGroup(val id: String, val label: String, val billed: Long, val billedTokens: Boolean)
 
-/** "NT Media …ys5": the saved API's current name if one matches, else the name/host recorded with the replies. */
-private fun keyLabel(id: String, usages: List<ReplyUsage>, profiles: List<ApiProfile>): String {
-    if (id == "?") return "Earlier (key not recorded)"
-    val host = id.substringBefore('|')
-    val hint = id.substringAfter('|')
-    if (hint.isEmpty()) return (if (ModelRates.isNtMedia("https://$host")) "NT Media" else host) + " (key not recorded)"
-    val name = profiles.firstOrNull { hostOf(it.baseUrl) == host && keyHint(it.apiKey) == hint }?.name
-        ?: usages.lastOrNull { it.apiName != null }?.apiName
-        ?: host
-    return "$name $hint"
+/** The API's name as recorded with the replies; old NT Media replies join a saved NT Media API by name. */
+private fun apiLabel(id: String, profiles: List<ApiProfile>): String = when (id) {
+    ReplyUsage.EARLIER -> "Earlier replies"
+    ReplyUsage.NT_MEDIA_OLD -> profiles.firstOrNull { ModelRates.isNtMedia(it.baseUrl) }?.name ?: "NT Media"
+    else -> id
 }
 
 private data class Costly(val conv: Conversation, val msg: ChatMessage, val usage: ReplyUsage)
@@ -185,15 +178,16 @@ fun UsageScreen(vm: ChatViewModel, onOpenChat: (String) -> Unit, onClose: () -> 
     val allReplies = remember(convs) {
         convs.flatMap { c -> c.messages.mapNotNull { m -> m.usage?.let { Costly(c, m, it) } } }
     }
-    // One group per API key, biggest first; the chips at the top filter the whole screen to one key.
+    // One group per API name, biggest first; the chips at the top filter the whole screen to one API.
     val keys = remember(allReplies, state.settings.profiles) {
-        allReplies.groupBy { it.usage.keyGroup }.map { (id, v) ->
-            KeyGroup(id, keyLabel(id, v.map { it.usage }, state.settings.profiles), v.sumOf { it.usage.billed }, v.any { it.usage.multiplier != null })
+        // Grouped by the label so old NT Media replies merge with the saved NT Media API of the same name.
+        allReplies.groupBy { apiLabel(it.usage.apiGroup, state.settings.profiles) }.map { (label, v) ->
+            KeyGroup(label, label, v.sumOf { it.usage.billed }, v.any { it.usage.multiplier != null })
         }.sortedByDescending { it.billed }
     }
     var keyFilter by rememberSaveable { mutableStateOf<String?>(null) }
-    val replies = remember(allReplies, keyFilter) {
-        if (keyFilter == null) allReplies else allReplies.filter { it.usage.keyGroup == keyFilter }
+    val replies = remember(allReplies, keyFilter, state.settings.profiles) {
+        if (keyFilter == null) allReplies else allReplies.filter { apiLabel(it.usage.apiGroup, state.settings.profiles) == keyFilter }
     }
     val all = remember(replies) { sum(replies.map { it.usage }) }
     val billedAll = remember(replies) { replies.sumOf { it.usage.billed } }
@@ -226,13 +220,13 @@ fun UsageScreen(vm: ChatViewModel, onOpenChat: (String) -> Unit, onClose: () -> 
                 item { Text("No usage yet — send a message first.", color = MaterialTheme.colorScheme.onSurfaceVariant) }
                 return@LazyColumn
             }
-            if (keys.size > 1 || keys.firstOrNull()?.id == "?") item {
+            if (keys.size > 1) item {
                 LazyRow(
                     Modifier.widthIn(max = 640.dp).fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
                     item {
-                        FilterChip(selected = keyFilter == null, onClick = { keyFilter = null }, label = { Text("All keys") })
+                        FilterChip(selected = keyFilter == null, onClick = { keyFilter = null }, label = { Text("All APIs") })
                     }
                     items(keys, key = { it.id }) { k ->
                         FilterChip(

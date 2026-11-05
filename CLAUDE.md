@@ -60,6 +60,10 @@ from drawing, so `BrowserPane` only attaches the WebView once a URL is open.
   built-in list, subresources only via `shouldInterceptRequest`; injected CSS hides Reddit/Google/GPT ad boxes;
   auto-dismisses "allow ads" JS alerts/confirms; NAG_JS removes in-page anti-adblock overlays + backdrop and
   restores scrolling, only when their text matches; hides SCMP-style empty `AdSlot` boxes and sticky "adhesion" ads).
+  Never blocks a page's own site (`siteOf`, e.g. dd.nytimes.com on nytimes.com) or `NEVER_BLOCK` services
+  (DataDome/captchas, Piano/tinypass, consent managers): the hosts list blocks them and NYT/NY Daily News got
+  stuck dimmed with an empty popup (1.13). ⋮ → Unblock page runs `UNBLOCK_PAGE_JS` (removes cover layers and
+  mid-screen high-z popups, restores scrolling).
   Page text for the AI: `assets/readability/` (Mozilla Readability 0.5.0, Apache-2.0) + `extract.js` → article
   only when `isProbablyReaderable` (CJK-lowered thresholds; it crashes on RTHK, so guarded) or the page declares
   itself an article (og:type / article:published_time / <article> / JSON-LD); else `innerText`. Tested in Playwright:

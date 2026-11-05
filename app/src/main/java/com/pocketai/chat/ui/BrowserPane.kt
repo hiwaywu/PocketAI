@@ -61,6 +61,7 @@ import androidx.compose.material.icons.filled.FormatSize
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.LockOpen
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Public
 import androidx.compose.material.icons.filled.Refresh
@@ -135,6 +136,8 @@ class BrowserTab(val id: Long, val webView: WebView) {
     var canGoForward by mutableStateOf(false)
     /** Restored tabs load their page only when first shown. */
     var pendingUrl: String? = null
+    /** Host of the page, readable from the WebView's network thread (for the ad blocker). */
+    @Volatile var pageHost: String? = null
 }
 
 fun hostLabel(url: String): String = runCatching { Uri.parse(url).host.orEmpty().removePrefix("www.") }.getOrDefault("")
@@ -204,7 +207,7 @@ class BrowserController(private val context: Context) {
         }
         wv.webViewClient = object : WebViewClient() {
             override fun onPageStarted(view: WebView, u: String?, favicon: Bitmap?) {
-                tab.url = u.orEmpty(); updateNav(tab)
+                tab.url = u.orEmpty(); tab.pageHost = Uri.parse(u.orEmpty()).host; updateNav(tab)
             }
 
             override fun onPageCommitVisible(view: WebView, u: String?) {
@@ -218,12 +221,12 @@ class BrowserController(private val context: Context) {
             }
 
             override fun doUpdateVisitedHistory(view: WebView, u: String?, isReload: Boolean) {
-                u?.let { tab.url = it }; updateNav(tab)
+                u?.let { tab.url = it; tab.pageHost = Uri.parse(it).host }; updateNav(tab)
             }
 
             override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): WebResourceResponse? {
                 // Never block the page itself, only ads/trackers it loads.
-                if (adBlockOn && !request.isForMainFrame && AdBlocker.isBlocked(request.url.host)) {
+                if (adBlockOn && !request.isForMainFrame && AdBlocker.isBlocked(request.url.host, tab.pageHost)) {
                     return WebResourceResponse("text/plain", "utf-8", ByteArrayInputStream(ByteArray(0)))
                 }
                 return null
@@ -366,6 +369,11 @@ class BrowserController(private val context: Context) {
         textZoom = percent
         prefs.edit().putInt("textZoom", percent).apply()
         tabs.forEach { it.webView.settings.textZoom = percent }
+    }
+
+    /** ⋮ → Unblock page. */
+    fun unblockPage() {
+        if (url.isNotBlank()) webView.evaluateJavascript(AdBlocker.UNBLOCK_PAGE_JS, null)
     }
 
     fun find(query: String) {
@@ -633,6 +641,7 @@ private fun AddressBar(
                     onClick = { b.setAdBlocking(!b.adBlock) },
                 )
                 MenuItem("Text size (${b.textZoom}%)", Icons.Filled.FormatSize) { menu = false; onTextSize() }
+                MenuItem("Unblock page (stuck popup)", Icons.Filled.LockOpen, enabled = b.url.isNotBlank()) { menu = false; b.unblockPage() }
             }
         }
     }

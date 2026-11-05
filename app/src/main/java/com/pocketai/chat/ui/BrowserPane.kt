@@ -132,6 +132,7 @@ import org.mozilla.geckoview.GeckoView
 import org.mozilla.geckoview.WebExtension
 import org.mozilla.geckoview.WebExtensionController
 import org.mozilla.geckoview.WebResponse
+import java.io.File
 import java.net.URLEncoder
 
 @Serializable
@@ -153,8 +154,9 @@ class BrowserTab(val id: Long, val session: GeckoSession) {
 fun hostLabel(url: String): String = runCatching { Uri.parse(url).host.orEmpty().removePrefix("www.") }.getOrDefault("")
 
 /**
- * The in-app browser, on GeckoView (Firefox's engine) so it runs Firefox add-ons. uBlock Origin is installed
- * from addons.mozilla.org on first use; more add-ons can be added from the Add-ons screen. A small built-in
+ * The in-app browser, on GeckoView (Firefox's engine) so it runs Firefox add-ons. uBlock Origin (from
+ * addons.mozilla.org) and Bypass Paywalls Clean (bundled .xpi) are installed on first use; more add-ons can be
+ * added from the Add-ons screen. A small built-in
  * add-on (assets/extensions/pocketai) reads the page's text for the AI and clears stuck popups.
  * Tabs (one GeckoSession each) and bookmarks are saved on the phone.
  */
@@ -219,7 +221,7 @@ class BrowserController(private val context: Context, private val runtime: Gecko
 
     private fun setUpAddons() {
         val controller = runtime.webExtensionController
-        // Add-ons are only installed when the user asks (or uBlock Origin on first run), so accept their prompts.
+        // Add-ons are only installed when the user asks (or the first-run ones), so accept their prompts.
         controller.setPromptDelegate(object : WebExtensionController.PromptDelegate {
             override fun onInstallPromptRequest(
                 extension: WebExtension, permissions: Array<String>, origins: Array<String>, dataCollection: Array<String>,
@@ -238,18 +240,21 @@ class BrowserController(private val context: Context, private val runtime: Gecko
             { ext -> if (ext != null) { bridge = ext; tabs.forEach { connectBridge(it) } } },
             { e -> Log.w(TAG, "Bridge add-on failed", e) },
         )
-        refreshAddons(installUBlock = !prefs.getBoolean("uBlockInstalled", false))
+        refreshAddons(installFirstRun = true)
     }
 
-    fun refreshAddons(installUBlock: Boolean = false) {
+    /** [installFirstRun]: install the [FIRST_RUN_ADDONS] that were never installed (a removed one stays removed). */
+    fun refreshAddons(installFirstRun: Boolean = false) {
         runtime.webExtensionController.list().accept({ list ->
             val all = list.orEmpty()
             addons.clear()
             addons.addAll(all.filter { !it.isBuiltIn }.sortedBy { it.metaData.name.orEmpty().lowercase() })
-            if (installUBlock && all.none { it.id == UBLOCK_ID }) install(UBLOCK_XPI, quiet = true) {
-                prefs.edit().putBoolean("uBlockInstalled", true).apply()
-            } else if (all.any { it.id == UBLOCK_ID }) {
-                prefs.edit().putBoolean("uBlockInstalled", true).apply()
+            for (a in FIRST_RUN_ADDONS) {
+                val markInstalled = { prefs.edit().putBoolean(a.pref, true).apply() }
+                when {
+                    all.any { it.id == a.id } -> markInstalled()
+                    installFirstRun && !prefs.getBoolean(a.pref, false) -> install(a.xpi, quiet = true, onDone = markInstalled)
+                }
             }
         }, { e -> Log.w(TAG, "Listing add-ons failed", e) })
     }
@@ -279,6 +284,17 @@ class BrowserController(private val context: Context, private val runtime: Gecko
             onDone()
             refreshAddons()
         }, { e ->
+            val asset = xpi.removePrefix(ASSETS_URL)
+            if (asset != xpi) {
+                // A bundled .xpi: if Gecko can't read it from inside the APK, copy it out and install that file.
+                Log.w(TAG, "Installing $asset from the APK failed; trying a copy", e)
+                val copy = runCatching {
+                    File(context.cacheDir, asset.substringAfterLast('/')).also { f ->
+                        context.assets.open(asset).use { input -> f.outputStream().use { input.copyTo(it) } }
+                    }
+                }.getOrNull()
+                if (copy != null) { install(Uri.fromFile(copy).toString(), quiet, onDone); return@accept }
+            }
             addonBusy = null
             toast("Couldn't install the add-on: ${e?.message ?: "unknown error"}")
         })
@@ -674,7 +690,19 @@ class BrowserController(private val context: Context, private val runtime: Gecko
         private const val BRIDGE_ID = "pocketai-bridge@pocketai"
         private const val BRIDGE_URL = "resource://android/assets/extensions/pocketai/"
         const val UBLOCK_ID = "uBlock0@raymondhill.net"
+        const val BPC_ID = "magnolia@12.34"
         private const val UBLOCK_XPI = "https://addons.mozilla.org/firefox/downloads/latest/ublock-origin/latest.xpi"
+        private const val ASSETS_URL = "resource://android/assets/"
+
+        /** An add-on installed once on first run; [pref] remembers it was, so one the user removes stays removed. */
+        private class FirstRunAddon(val id: String, val xpi: String, val pref: String)
+
+        private val FIRST_RUN_ADDONS = listOf(
+            FirstRunAddon(UBLOCK_ID, UBLOCK_XPI, "uBlockInstalled"),
+            // Bypass Paywalls Clean (MIT, signed by Mozilla for self-distribution; not on addons.mozilla.org), bundled
+            // in assets/extensions. Newer versions: paste a direct .xpi link from its gitflic page in Add-ons.
+            FirstRunAddon(BPC_ID, ASSETS_URL + "extensions/bypass_paywalls_clean.xpi", "bpcInstalled"),
+        )
         private val WEB_SCHEMES = setOf("http", "https", "about", "data", "blob", "file", "moz-extension", "resource", "javascript", "view-source")
 
         private val DEFAULT_BOOKMARKS = listOf(
@@ -1130,7 +1158,11 @@ private fun AddonsDialog(b: BrowserController, onDismiss: () -> Unit) {
                             Column(Modifier.weight(1f)) {
                                 Text(ext.metaData.name ?: ext.id, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
                                 Text(
-                                    "v" + ext.metaData.version + if (ext.id == BrowserController.UBLOCK_ID) " · ad blocker" else "",
+                                    "v" + ext.metaData.version + when (ext.id) {
+                                        BrowserController.UBLOCK_ID -> " · ad blocker"
+                                        BrowserController.BPC_ID -> " · paywalls"
+                                        else -> ""
+                                    },
                                     style = MaterialTheme.typography.labelSmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 )
@@ -1143,7 +1175,8 @@ private fun AddonsDialog(b: BrowserController, onDismiss: () -> Unit) {
                 }
                 Spacer(Modifier.height(12.dp))
                 Text(
-                    "Add from addons.mozilla.org: paste the add-on's page link, or type its name (e.g. \"dark reader\").",
+                    "Add from addons.mozilla.org: paste the add-on's page link, or type its name (e.g. \"dark reader\"). " +
+                        "A direct .xpi link works too.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )

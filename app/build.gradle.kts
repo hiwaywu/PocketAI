@@ -17,8 +17,8 @@ android {
         applicationId = "com.pocketai.chat"
         minSdk = 26
         targetSdk = 35
-        versionCode = 15
-        versionName = "2.0"
+        versionCode = 16
+        versionName = "2.1"
         // The browser engine ships only for 64-bit ARM (the Fold), so drop other chip types' libraries too.
         ndk { abiFilters += listOf("arm64-v8a") }
     }

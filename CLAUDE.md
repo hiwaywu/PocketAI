@@ -62,7 +62,11 @@ Emulator: the APK is arm64-only now (GeckoView), so use an arm64 emulator image 
   size off)/Block ads/Unblock page; Chrome-style address pill that selects all on tap; prompt delegate for
   alert/confirm/text/<select>; long-press link menu; `onNewSession` → new tab. **uBlock Origin** is installed from
   AMO on first run (`uBlockInstalled` pref; not re-installed if the user removes it) and replaced the old
-  hosts-list `AdBlocker` (which broke NYT/NY Daily News). Add-ons dialog installs from an AMO link or name.
+  hosts-list `AdBlocker` (which broke NYT/NY Daily News). **Bypass Paywalls Clean** (2.1; MIT, Mozilla-signed for
+  self-distribution, not on AMO) is bundled as `assets/extensions/bypass_paywalls_clean.xpi` and installed the same
+  way (`FIRST_RUN_ADDONS`, `bpcInstalled` pref) from `resource://android/assets/…` (falls back to a cache-dir copy
+  via `file://`); it updates its site rules itself from gitflic. Add-ons dialog installs from an AMO link, a name or
+  a direct .xpi link.
   The built-in add-on `assets/extensions/pocketai/` (content script + Mozilla Readability 0.5.0, Apache-2.0)
   talks to the app over a native port ("browser"): `extract` → article-only text on article pages
   (`isProbablyReaderable` with CJK-lowered thresholds, guarded since it throws on RTHK, or the page declares

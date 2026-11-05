@@ -64,8 +64,11 @@ from drawing, so `BrowserPane` only attaches the WebView once a URL is open.
   `prompt_tokens_details.cached_tokens` (prefix caching works, incl. between tool steps);
   `reasoning_effort` is not reliably honored; no balance/usage endpoint; reasoning isn't streamed.
 
-- The system prompt names the answering model id + host (models otherwise copy earlier replies' identity
-  claims, e.g. "I'm Claude" after switching models; NT Media injects its own identity prompt, OpenCode doesn't).
+- Don't tell the model its name in the system prompt (tried in 1.5, removed in 1.6): the owner asks models
+  what they are to check whether a provider is honest, and naming it just makes the model repeat it.
+  NT Media injects its own identity prompt; OpenCode doesn't. In Nov 2026 tests several NT Media "models"
+  (Claude/GPT/Gemini/DeepSeek names) gave near-identical answers, searches and `call_00_…` tool-call ids,
+  which hints they share one backend — unproven.
 - Token policy: don't waste, don't skimp. Chat text is always re-sent in full; raw web results only for the
   latest answer; photos/shared pages only for the last 4 user messages; system prompt has date only so
   provider prompt caching works. Each reply records tokens, steps, searches, pages, seconds.

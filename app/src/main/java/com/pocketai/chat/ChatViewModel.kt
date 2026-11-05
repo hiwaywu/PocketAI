@@ -686,6 +686,20 @@ class ChatViewModel(private val app: Application) : AndroidViewModel(app) {
         val today = SimpleDateFormat("EEEE, MMMM d, yyyy", Locale.US).format(Date())
         val zone = java.util.TimeZone.getDefault().id
         var system = s.systemPrompt.trim() + "\n\nToday's date is $today (the user's time zone is $zone)."
+        // Without this, sources in another language (e.g. a Cantonese video) leaked untranslated quotes,
+        // or the whole reply switched language.
+        system += "\nAlways reply in the language of the user's own typed words (even a one-word request like " +
+            "'Summary' or 'Explain' means English), never the language of a shared page, video or search result. " +
+            "Don't quote foreign-language text on its own: translate it. If the original wording matters (a name, " +
+            "title or key quote), give the translation first and the original after it in brackets; never guess the " +
+            "English spelling of a name you're unsure of." +
+            // Summaries used to follow the source sentence by sentence and read like a stiff translation.
+            "\nWhen you summarize an article, video or page: write it the way a sharp journalist would brief a " +
+            "friend, in natural language, not a sentence-by-sentence translation and not in the source's order or " +
+            "officialese. Start with one or two sentences on what happened and why it matters. Then give the key " +
+            "details as short bullets: who, what, when, where, numbers, money, dates and notable quotes, keeping " +
+            "every concrete specific and dropping filler. End with what happens next or what's still unclear, if " +
+            "relevant. Use only the page's main content and don't add facts the source doesn't state."
         if (s.webTools) {
             system += "\nYou can use the web_search and fetch_url tools. Use them whenever a question needs current " +
                 "or specific information (news, scores, prices, schedules) or the user shares a link. " +

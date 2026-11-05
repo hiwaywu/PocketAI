@@ -15,7 +15,8 @@ Built for the Galaxy Z Fold 7: chat and browser sit side by side when unfolded.
 - **YouTube** – shared or pasted YouTube links are summarized from the title and description (plus captions when
   YouTube allows it). For a full summary, open the video in the Browser tab, tap *...more → Show transcript*, then
   type "summarize" in the browser's message bar.
-- **In-app browser** – browse yourself and type any question in the message bar at the bottom; it's sent with the page.
+- **In-app browser** – tabs, bookmarks, find in page, desktop mode, text size and a built-in ad blocker; type any
+  question in the message bar at the bottom and it's sent with the page.
 - **Share to Pocket AI** – share a link from Firefox, Chrome, YouTube, etc. and get a summary; share photos from
   the gallery to ask about them.
 - **Photos** – attach up to 4 photos or take one with the camera (needs a vision-capable model).

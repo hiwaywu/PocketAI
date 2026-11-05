@@ -24,6 +24,9 @@ jobs:
           java-version: "17"
 
       - uses: android-actions/setup-android@v3
+        with:
+          # The action's default list includes "tools", which the SDK repository no longer has (sdkmanager fails).
+          packages: platform-tools platforms;android-37.2 build-tools;36.0.0
 
       - name: Check version
         run: |

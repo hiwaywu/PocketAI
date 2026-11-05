@@ -23,6 +23,7 @@ import com.pocketai.chat.data.SettingsStore
 import com.pocketai.chat.data.Source
 import com.pocketai.chat.data.ToolEvent
 import com.pocketai.chat.data.hostOf
+import com.pocketai.chat.data.keyHint
 import com.pocketai.chat.data.normalizeBaseUrl
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -570,6 +571,9 @@ class ChatViewModel(private val app: Application) : AndroidViewModel(app) {
             estimated = !reported,
             seconds = ((System.currentTimeMillis() - started) / 1000).toInt(),
             multiplier = ModelRates.multiplier(s.baseUrl, s.model),
+            apiName = s.connectionName,
+            apiHost = hostOf(s.baseUrl),
+            keyHint = keyHint(s.apiKey),
         )
         updateMsg(convId, msgId) {
             it.copy(

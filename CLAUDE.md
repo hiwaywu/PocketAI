@@ -55,7 +55,8 @@ from drawing, so `BrowserPane` only attaches the WebView once a URL is open.
   a Chrome-style address pill, a message bar that sends the question with the page text, no preset prompts;
   user agent has `; wv`/`Version/x` stripped so sites serve normal mobile pages),
   `SettingsScreen` (NovelAI-style saved APIs + "Save this API setting?" prompt + Load models),
-  `UsageScreen` (per-reply and overall token breakdown), `Markdown` (small renderer).
+  `UsageScreen` (per-reply and overall token breakdown; filter chips per API key — `ReplyUsage.apiName/apiHost/
+  keyHint` since 1.10, key hint = last 4 chars only), `Markdown` (small renderer).
 
 ## Decisions so far
 

@@ -668,12 +668,6 @@ class ChatViewModel(private val app: Application) : AndroidViewModel(app) {
         val today = SimpleDateFormat("EEEE, MMMM d, yyyy", Locale.US).format(Date())
         val zone = java.util.TimeZone.getDefault().id
         var system = s.systemPrompt.trim() + "\n\nToday's date is $today (the user's time zone is $zone)."
-        // Models often don't know their own name, and copy what earlier replies in the chat claimed
-        // (e.g. "I'm Claude"), especially after switching models. Say which one is answering.
-        // Same text for every message with this model, so prompt caching still works.
-        system += "\nThis reply is written by the model `${s.model}` (via ${hostOf(s.baseUrl).ifBlank { s.baseUrl }}). " +
-            "If asked which model you are, say that. Earlier replies in this chat may have come from other models, " +
-            "so don't repeat what they said about themselves."
         if (s.webTools) {
             system += "\nYou can use the web_search and fetch_url tools. Use them whenever a question needs current " +
                 "or specific information (news, scores, prices, schedules) or the user shares a link. " +

@@ -6,7 +6,11 @@ Owner's main provider is now NT Media (`https://api.ntmedia.store`, used ~99% of
 
 ## Build & run
 
-- Needs JDK 17 and Android SDK platform 35 (`local.properties` → `sdk.dir=...`, not committed).
+- Needs JDK 17+ (21 used) and Android SDK platform **37.2** (`platforms;android-37.2`; GeckoView and its AndroidX
+  deps require it), `local.properties` → `sdk.dir=...` (not committed). Toolchain (2.0): Gradle 9.8.2, AGP 9.5
+  (built-in Kotlin, no kotlin-android plugin), Kotlin 2.4.20, Compose BOM 2026.09.00. Maven Central often
+  answers 429 to cloud builds, so `settings.gradle.kts` lists Google's Maven Central mirror first.
+- APK is arm64-only (~100 MB; `abiFilters arm64-v8a`, native libs stored compressed).
 - `./gradlew assembleRelease` → `app/build/outputs/apk/release/app-release.apk`. Signed with the permanent
   release key when `keystore.properties` (git-ignored: storeFile, storePassword, keyAlias, keyPassword) or
   the `POCKETAI_KEYSTORE*` env vars are present; otherwise with the debug key, which can NOT update an
@@ -28,8 +32,7 @@ Asking anything containing "nba" makes the mock request a `web_search`, so the f
 (real search on the device → result → final answer) is exercised. It logs each request's size and
 roles to `mock_requests.log`.
 
-Emulator gotcha: an attached WebView that has never loaded a page stopped the rest of the Compose UI
-from drawing, so `BrowserPane` only attaches the WebView once a URL is open.
+Emulator: the APK is arm64-only now (GeckoView), so use an arm64 emulator image or a real phone.
 
 ## Code map (`app/src/main/java/com/pocketai/chat/`)
 
@@ -52,23 +55,20 @@ from drawing, so `BrowserPane` only attaches the WebView once a URL is open.
 - `data/Settings.kt` — `AppSettings` (saved API profiles, search engine/keys), stored as one AES-GCM
   Android-Keystore-encrypted JSON blob. `data/Chats.kt` — chats as JSON files, `ReplyUsage`, photo import.
 - `ui/` — `AppRoot` (fold-aware: side-by-side ≥600dp, tabs when folded), `ChatScreen`, `BrowserPane`
-  (`BrowserController`: tabs = one WebView each, restored lazily from prefs; bookmarks (new-tab tiles); ⋮ menu with
-  find/share/copy/open externally/desktop UA/text size/ad block; Chrome-style address pill that selects all on
-  tap; message bar that sends the question with the page text, no preset prompts; user agent has `; wv`/
-  `Version/x` stripped so sites serve normal mobile pages; `textZoom` fixed at 100 by default because following
-  the phone's font scale made text overflow its boxes), `AdBlocker` (StevenBlack hosts list cached weekly +
-  built-in list, subresources only via `shouldInterceptRequest`; injected CSS hides Reddit/Google/GPT ad boxes;
-  auto-dismisses "allow ads" JS alerts/confirms; NAG_JS removes in-page anti-adblock overlays + backdrop and
-  restores scrolling, only when their text matches; hides SCMP-style empty `AdSlot` boxes and sticky "adhesion" ads).
-  Never blocks a page's own site (`siteOf`, e.g. dd.nytimes.com on nytimes.com) or `NEVER_BLOCK` services
-  (DataDome/captchas, Piano/tinypass, consent managers): the hosts list blocks them and NYT/NY Daily News got
-  stuck dimmed with an empty popup (1.13). ⋮ → Unblock page runs `UNBLOCK_PAGE_JS` (removes cover layers and
-  mid-screen high-z popups, restores scrolling).
-  Page text for the AI: `assets/readability/` (Mozilla Readability 0.5.0, Apache-2.0) + `extract.js` → article
-  only when `isProbablyReaderable` (CJK-lowered thresholds; it crashes on RTHK, so guarded) or the page declares
-  itself an article (og:type / article:published_time / <article> / JSON-LD); else `innerText`. Tested in Playwright:
-  RTHK 3,326→221 chars, hk01/NYPost/BBC −30–40%, RTHK list/Reddit unchanged. Sidebar headlines leaked into
-  summaries before.
+  (since 2.0 on **GeckoView** = Firefox's engine, `org.mozilla.geckoview:geckoview-arm64-v8a`, so it runs Firefox
+  add-ons. One `GeckoRuntime` per process in `PocketApp.gecko`; `BrowserController`: tabs = one `GeckoSession`
+  each (restored lazily from prefs), one `GeckoView` with the current session attached; bookmarks (new-tab tiles);
+  ⋮ menu with add-ons/find/share/copy/open externally/desktop mode/text size (`fontSizeFactor`, automatic font
+  size off)/Block ads/Unblock page; Chrome-style address pill that selects all on tap; prompt delegate for
+  alert/confirm/text/<select>; long-press link menu; `onNewSession` → new tab. **uBlock Origin** is installed from
+  AMO on first run (`uBlockInstalled` pref; not re-installed if the user removes it) and replaced the old
+  hosts-list `AdBlocker` (which broke NYT/NY Daily News). Add-ons dialog installs from an AMO link or name.
+  The built-in add-on `assets/extensions/pocketai/` (content script + Mozilla Readability 0.5.0, Apache-2.0)
+  talks to the app over a native port ("browser"): `extract` → article-only text on article pages
+  (`isProbablyReaderable` with CJK-lowered thresholds, guarded since it throws on RTHK, or the page declares
+  itself an article), else `innerText`; `unblock` → removes cover layers/mid-screen popups, restores scrolling.
+  Article extraction tested in Playwright: RTHK 3,326→221 chars, hk01/NYPost/BBC −30–40%, RTHK list/Reddit
+  unchanged (sidebar headlines leaked into summaries before).
   `SettingsScreen` (NovelAI-style saved APIs + "Save this API setting?" prompt + Load models),
   `UsageScreen` (per-reply and overall token breakdown; filter chips per API *name* — `ReplyUsage.apiName`
   since 1.10; the owner wants names only, no key hints), `Markdown` (small renderer).

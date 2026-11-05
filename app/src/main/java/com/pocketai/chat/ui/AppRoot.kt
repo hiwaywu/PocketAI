@@ -74,7 +74,7 @@ private enum class Tab { CHAT, BROWSER }
 fun AppRoot(vm: ChatViewModel) {
     val state by vm.state.collectAsStateWithLifecycle()
     val context = LocalContext.current
-    val browser = remember { BrowserController(context) }
+    val browser = remember { BrowserController(context, (context.applicationContext as com.pocketai.chat.PocketApp).gecko) }
     DisposableEffect(Unit) { onDispose { browser.destroy() } }
 
     var tab by rememberSaveable { mutableStateOf(Tab.CHAT) }

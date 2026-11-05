@@ -75,7 +75,7 @@ fun AppRoot(vm: ChatViewModel) {
     val state by vm.state.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val browser = remember { BrowserController(context) }
-    DisposableEffect(Unit) { onDispose { browser.webView.destroy() } }
+    DisposableEffect(Unit) { onDispose { browser.destroy() } }
 
     var tab by rememberSaveable { mutableStateOf(Tab.CHAT) }
     var showSettings by rememberSaveable { mutableStateOf(!state.settings.isConfigured && state.settings.profiles.isEmpty()) }
@@ -89,7 +89,7 @@ fun AppRoot(vm: ChatViewModel) {
 
     LaunchedEffect(Unit) {
         vm.openUrl.collect { url ->
-            browser.go(url)
+            browser.openFromChat(url)
             if (wideNow) browserPane = true else tab = Tab.BROWSER
         }
     }

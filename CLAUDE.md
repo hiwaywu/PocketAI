@@ -51,9 +51,14 @@ from drawing, so `BrowserPane` only attaches the WebView once a URL is open.
   them). `ReplyUsage.multiplier`/`billed` = tokens × multiplier, shown in chat, usage dialog/screen, model menu.
 - `data/Settings.kt` — `AppSettings` (saved API profiles, search engine/keys), stored as one AES-GCM
   Android-Keystore-encrypted JSON blob. `data/Chats.kt` — chats as JSON files, `ReplyUsage`, photo import.
-- `ui/` — `AppRoot` (fold-aware: side-by-side ≥600dp, tabs when folded), `ChatScreen`, `BrowserPane` (WebView with
-  a Chrome-style address pill, a message bar that sends the question with the page text, no preset prompts;
-  user agent has `; wv`/`Version/x` stripped so sites serve normal mobile pages),
+- `ui/` — `AppRoot` (fold-aware: side-by-side ≥600dp, tabs when folded), `ChatScreen`, `BrowserPane`
+  (`BrowserController`: tabs = one WebView each, restored lazily from prefs; bookmarks (new-tab tiles); ⋮ menu with
+  find/share/copy/open externally/desktop UA/text size/ad block; Chrome-style address pill that selects all on
+  tap; message bar that sends the question with the page text, no preset prompts; user agent has `; wv`/
+  `Version/x` stripped so sites serve normal mobile pages; `textZoom` fixed at 100 by default because following
+  the phone's font scale made text overflow its boxes), `AdBlocker` (StevenBlack hosts list cached weekly +
+  built-in list, subresources only via `shouldInterceptRequest`; injected CSS hides Reddit/Google/GPT ad boxes;
+  auto-dismisses "allow ads" JS alerts/confirms),
   `SettingsScreen` (NovelAI-style saved APIs + "Save this API setting?" prompt + Load models),
   `UsageScreen` (per-reply and overall token breakdown; filter chips per API *name* — `ReplyUsage.apiName`
   since 1.10; the owner wants names only, no key hints), `Markdown` (small renderer).
@@ -77,6 +82,8 @@ from drawing, so `BrowserPane` only attaches the WebView once a URL is open.
   shared pages as possibly outdated. Before: 4/4 runs answered "who did Makhachev last beat" from a stale
   article without searching; after: 4/4 searched "… last fight November 2026" and answered from the newest
   result. The no-tools final step gets an "answer now" note (DeepSeek otherwise prints raw DSML tool calls).
+- Replies are in the user's language; foreign-language source text is translated (original in brackets only
+  when it matters). Tested: without the rule a Cantonese video summary came back fully in Chinese 1 of 2 runs.
 - Token policy: don't waste, don't skimp. Chat text is always re-sent in full; raw web results only for the
   latest answer; photos/shared pages only for the last 4 user messages; system prompt has date only so
   provider prompt caching works. Each reply records tokens, steps, searches, pages, seconds.

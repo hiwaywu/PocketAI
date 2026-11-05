@@ -686,6 +686,11 @@ class ChatViewModel(private val app: Application) : AndroidViewModel(app) {
         val today = SimpleDateFormat("EEEE, MMMM d, yyyy", Locale.US).format(Date())
         val zone = java.util.TimeZone.getDefault().id
         var system = s.systemPrompt.trim() + "\n\nToday's date is $today (the user's time zone is $zone)."
+        // Without this, sources in another language (e.g. a Cantonese video) leaked untranslated quotes,
+        // or the whole reply switched language.
+        system += "\nAlways reply in the language the user writes in, even when the sources are in another language. " +
+            "Don't quote foreign-language text on its own: translate it. If the original wording matters (a name, " +
+            "title or key quote), give the translation first and the original after it in brackets."
         if (s.webTools) {
             system += "\nYou can use the web_search and fetch_url tools. Use them whenever a question needs current " +
                 "or specific information (news, scores, prices, schedules) or the user shares a link. " +

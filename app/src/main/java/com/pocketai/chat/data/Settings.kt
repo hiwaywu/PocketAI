@@ -99,6 +99,9 @@ data class AppSettings(
     }
 }
 
+/** Last 4 characters of an API key ("…0uax"): enough to tell keys apart, never the key itself. */
+fun keyHint(key: String): String = key.trim().takeLast(4).let { if (it.isEmpty()) "" else "…$it" }
+
 fun hostOf(url: String): String = runCatching { Uri.parse(url.trim()).host.orEmpty() }
     .getOrDefault("").removePrefix("www.")
 

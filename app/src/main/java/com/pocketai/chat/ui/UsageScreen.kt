@@ -31,6 +31,12 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.material3.FilterChip
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
@@ -44,7 +50,10 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.pocketai.chat.ChatViewModel
 import com.pocketai.chat.data.ChatMessage
 import com.pocketai.chat.data.Conversation
+import com.pocketai.chat.data.ApiProfile
 import com.pocketai.chat.data.ModelRates
+import com.pocketai.chat.data.hostOf
+import com.pocketai.chat.data.keyHint
 import com.pocketai.chat.data.ReplyUsage
 
 private data class Part(val label: String, val tokens: Long, val color: Color)
@@ -148,6 +157,20 @@ fun UsageDialog(u: ReplyUsage, onDismiss: () -> Unit) {
     )
 }
 
+private data class KeyGroup(val id: String, val label: String, val billed: Long, val billedTokens: Boolean)
+
+/** "NT Media …ys5": the saved API's current name if one matches, else the name/host recorded with the replies. */
+private fun keyLabel(id: String, usages: List<ReplyUsage>, profiles: List<ApiProfile>): String {
+    if (id == "?") return "Earlier (key not recorded)"
+    val host = id.substringBefore('|')
+    val hint = id.substringAfter('|')
+    if (hint.isEmpty()) return (if (ModelRates.isNtMedia("https://$host")) "NT Media" else host) + " (key not recorded)"
+    val name = profiles.firstOrNull { hostOf(it.baseUrl) == host && keyHint(it.apiKey) == hint }?.name
+        ?: usages.lastOrNull { it.apiName != null }?.apiName
+        ?: host
+    return "$name $hint"
+}
+
 private data class Costly(val conv: Conversation, val msg: ChatMessage, val usage: ReplyUsage)
 
 /** Token usage across all saved chats: totals, where tokens went, and the most expensive replies. */
@@ -159,8 +182,18 @@ fun UsageScreen(vm: ChatViewModel, onOpenChat: (String) -> Unit, onClose: () -> 
     val convs = remember(state.conversations, state.current) {
         (listOf(state.current) + state.conversations.filterNot { it.id == state.current.id }).filter { it.messages.isNotEmpty() }
     }
-    val replies = remember(convs) {
+    val allReplies = remember(convs) {
         convs.flatMap { c -> c.messages.mapNotNull { m -> m.usage?.let { Costly(c, m, it) } } }
+    }
+    // One group per API key, biggest first; the chips at the top filter the whole screen to one key.
+    val keys = remember(allReplies, state.settings.profiles) {
+        allReplies.groupBy { it.usage.keyGroup }.map { (id, v) ->
+            KeyGroup(id, keyLabel(id, v.map { it.usage }, state.settings.profiles), v.sumOf { it.usage.billed }, v.any { it.usage.multiplier != null })
+        }.sortedByDescending { it.billed }
+    }
+    var keyFilter by rememberSaveable { mutableStateOf<String?>(null) }
+    val replies = remember(allReplies, keyFilter) {
+        if (keyFilter == null) allReplies else allReplies.filter { it.usage.keyGroup == keyFilter }
     }
     val all = remember(replies) { sum(replies.map { it.usage }) }
     val billedAll = remember(replies) { replies.sumOf { it.usage.billed } }
@@ -189,9 +222,26 @@ fun UsageScreen(vm: ChatViewModel, onOpenChat: (String) -> Unit, onClose: () -> 
             verticalArrangement = Arrangement.spacedBy(14.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            if (replies.isEmpty()) {
+            if (allReplies.isEmpty()) {
                 item { Text("No usage yet — send a message first.", color = MaterialTheme.colorScheme.onSurfaceVariant) }
                 return@LazyColumn
+            }
+            if (keys.size > 1 || keys.firstOrNull()?.id == "?") item {
+                LazyRow(
+                    Modifier.widthIn(max = 640.dp).fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    item {
+                        FilterChip(selected = keyFilter == null, onClick = { keyFilter = null }, label = { Text("All keys") })
+                    }
+                    items(keys, key = { it.id }) { k ->
+                        FilterChip(
+                            selected = keyFilter == k.id,
+                            onClick = { keyFilter = if (keyFilter == k.id) null else k.id },
+                            label = { Text("${k.label} · ${formatTokens(k.billed)}${if (k.billedTokens) " billed" else ""}") },
+                        )
+                    }
+                }
             }
             item {
                 Column(Modifier.widthIn(max = 640.dp).fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {

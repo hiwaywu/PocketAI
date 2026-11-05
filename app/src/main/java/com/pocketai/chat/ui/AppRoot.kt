@@ -102,11 +102,19 @@ fun AppRoot(vm: ChatViewModel) {
     // A share from another app always lands on the chat.
     LaunchedEffect(state.current.id) { if (!wideNow && state.current.messages.isNotEmpty()) tab = Tab.CHAT }
 
-    val askAi: (Boolean) -> Unit = { summarize ->
-        browser.extractPage { text ->
-            vm.attachPage(browser.title, browser.url, text, summarize)
-            if (!wideNow) tab = Tab.CHAT
+    // The browser's message bar. The page text is read asynchronously, so report "sent" right away
+    // unless it obviously can't be sent; problems show up as a notice.
+    val askAi: (String) -> Boolean = ask@{ question ->
+        if (state.streaming) { vm.notice("Wait for the current reply to finish (or stop it) first."); return@ask false }
+        if (browser.url.isBlank()) {
+            val ok = vm.askFromBrowser("", "", null, question)
+            if (ok && !wideNow) tab = Tab.CHAT
+            return@ask ok
         }
+        browser.extractPage { text ->
+            if (vm.askFromBrowser(browser.title, browser.url, text, question) && !wideNow) tab = Tab.CHAT
+        }
+        true
     }
 
     if (showSettings) {
@@ -154,7 +162,7 @@ fun AppRoot(vm: ChatViewModel) {
                     chat(Modifier.weight(1f))
                     if (browserPane) {
                         VerticalDivider()
-                        BrowserPane(browser, onAsk = askAi, modifier = Modifier.weight(1f))
+                        BrowserPane(browser, busy = state.streaming, onAsk = askAi, onStop = vm::stop, modifier = Modifier.weight(1f))
                     }
                 }
             } else {
@@ -183,7 +191,7 @@ fun AppRoot(vm: ChatViewModel) {
                     Box(Modifier.padding(pad).consumeWindowInsets(pad)) {
                         when (tab) {
                             Tab.CHAT -> chat(Modifier.fillMaxSize())
-                            Tab.BROWSER -> BrowserPane(browser, onAsk = askAi, modifier = Modifier.fillMaxSize())
+                            Tab.BROWSER -> BrowserPane(browser, busy = state.streaming, onAsk = askAi, onStop = vm::stop, modifier = Modifier.fillMaxSize())
                         }
                     }
                 }

@@ -318,7 +318,7 @@ class WebTools(private val http: OkHttpClient, private val appContext: Context) 
             else append(
                 "(No transcript could be loaded for this video. Summarize from the title and description, say that the " +
                     "transcript wasn't available, and tip the user: for a full summary, open the video in Pocket AI's " +
-                    "Browser tab, tap \"...more\" then \"Show transcript\", and tap \"Summarize page\".)"
+                    "Browser tab, tap \"...more\" then \"Show transcript\", then type \"summarize\" in the browser's message bar.)"
             )
         }
         return FetchedPage(title, original, text.take(60_000))

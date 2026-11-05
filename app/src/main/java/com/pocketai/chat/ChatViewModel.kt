@@ -475,6 +475,12 @@ class ChatViewModel(private val app: Application) : AndroidViewModel(app) {
                 putJsonArray("messages") {
                     history.messages.forEach { add(it) }
                     trail.forEach { add(it) }
+                    // Out of web steps: without this, some models (DeepSeek) still try to search and print the
+                    // raw tool-call markup as their answer.
+                    if (useTools && !allowTools && trail.isNotEmpty()) addJsonObject {
+                        put("role", "user")
+                        put("content", "[Pocket AI: you've used all your web steps for this answer. Answer now with what you have; don't call any tools.]")
+                    }
                 }
                 if (allowTools) put("tools", WebTools.TOOL_DEFS)
             }
@@ -685,7 +691,17 @@ class ChatViewModel(private val app: Application) : AndroidViewModel(app) {
                 "'yesterday', 'this weekend') into exact dates using today's date; do ONE precise search first; answer " +
                 "from the search summaries when they are enough; open at most 1-3 pages, preferring official or major " +
                 "sites (e.g. ESPN, NBA.com, AP, Reuters); never repeat near-identical searches. " +
-                "When you use information from the web, cite the sources as Markdown links."
+                "When you use information from the web, cite the sources as Markdown links. " +
+                // Without this, models answer "latest/last" questions from their (old) training or from an old
+                // shared article, or search for the answer they already believe (e.g. a 2025 fight in 2026).
+                "Your own knowledge stops well before today, so for anything that changes over time (latest, last, " +
+                "next or current results, events, records, titles, prices, versions, who holds a role) assume newer " +
+                "events may exist that you don't know about. Search with an open query that doesn't presuppose the " +
+                "answer, adding the current month and year (e.g. 'Islam Makhachev last fight November 2026', not the " +
+                "fight you remember). Check the dates on the results and go with the newest; if they disagree with " +
+                "your memory, trust the newest dated results. One open search is usually enough: search again only " +
+                "if the results point to something newer. Pages the user shares are snapshots from when they were " +
+                "written and may be outdated too."
         }
         out += buildJsonObject { put("role", "system"); put("content", system) }
         textChars += system.length

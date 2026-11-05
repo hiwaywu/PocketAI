@@ -51,7 +51,9 @@ from drawing, so `BrowserPane` only attaches the WebView once a URL is open.
   them). `ReplyUsage.multiplier`/`billed` = tokens × multiplier, shown in chat, usage dialog/screen, model menu.
 - `data/Settings.kt` — `AppSettings` (saved API profiles, search engine/keys), stored as one AES-GCM
   Android-Keystore-encrypted JSON blob. `data/Chats.kt` — chats as JSON files, `ReplyUsage`, photo import.
-- `ui/` — `AppRoot` (fold-aware: side-by-side ≥600dp, tabs when folded), `ChatScreen`, `BrowserPane`,
+- `ui/` — `AppRoot` (fold-aware: side-by-side ≥600dp, tabs when folded), `ChatScreen`, `BrowserPane` (WebView with
+  a Chrome-style address pill, a message bar that sends the question with the page text, no preset prompts;
+  user agent has `; wv`/`Version/x` stripped so sites serve normal mobile pages),
   `SettingsScreen` (NovelAI-style saved APIs + "Save this API setting?" prompt + Load models),
   `UsageScreen` (per-reply and overall token breakdown), `Markdown` (small renderer).
 
@@ -78,7 +80,7 @@ from drawing, so `BrowserPane` only attaches the WebView once a URL is open.
 - Only the OpenAI Chat Completions format is implemented. The NovelAI app also supports Anthropic format
   (`/v1/messages`) — a possible addition, which would also allow Claude's server-side web search via MWAPI.
 - YouTube caption downloads are blocked by YouTube; don't try to impersonate YouTube app clients.
-  The workaround is the in-app browser: *...more → Show transcript* → *Summarize page*.
+  The workaround is the in-app browser: *...more → Show transcript*, then ask in the browser's message bar.
 - OpenCode Go (`https://opencode.ai/inference/go/v1`; old `/zen/go/v1` also answers) rejects requests
   without `x-opencode-session` (400 MissingSessionID). `ChatClient` sends the chat id there for opencode.ai
   hosts, and a `PocketAI/<version> (Android)` User-Agent everywhere. OpenCode says Go is designed for coding

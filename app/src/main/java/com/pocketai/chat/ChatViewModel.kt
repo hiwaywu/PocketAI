@@ -276,13 +276,23 @@ class ChatViewModel(private val app: Application) : AndroidViewModel(app) {
         _state.update { it.copy(pendingImages = it.pendingImages - path) }
     }
 
-    fun attachPage(title: String, url: String, text: String, summarize: Boolean) {
-        if (text.isBlank()) {
-            notice("Couldn't read any text on this page yet — wait for it to load and try again.")
-            return
+    /**
+     * The browser's message bar: sends [question] with the open page's text attached
+     * (or as a plain message when no page is open). Returns false if it couldn't be sent.
+     */
+    fun askFromBrowser(title: String, url: String, pageText: String?, question: String): Boolean {
+        if (state.value.streaming) {
+            notice("Wait for the current reply to finish (or stop it) first.")
+            return false
         }
-        _state.update { it.copy(pendingPage = PageContext(title.ifBlank { url }, url, text.take(MAX_PAGE_CHARS))) }
-        if (summarize) send("Summarize this page.")
+        if (pageText != null) {
+            if (pageText.isBlank()) {
+                notice("Couldn't read any text on this page yet — wait for it to load and try again.")
+                return false
+            }
+            _state.update { it.copy(pendingPage = PageContext(title.ifBlank { url }, url, pageText.take(MAX_PAGE_CHARS))) }
+        }
+        return send(question)
     }
 
     fun clearPage() = _state.update { it.copy(pendingPage = null) }

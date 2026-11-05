@@ -61,7 +61,6 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedCard
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -139,7 +138,7 @@ fun ChatScreen(
         val listState = rememberLazyListState()
         Box(Modifier.weight(1f).fillMaxWidth()) {
             if (conv.messages.isEmpty()) {
-                EmptyState(needsSetup = !state.settings.isConfigured, onSettings = onSettings, onPrompt = { vm.send(it) })
+                EmptyState(needsSetup = !state.settings.isConfigured, onSettings = onSettings)
             } else {
                 val msgs = conv.messages
                 val lastId = msgs.last().id
@@ -253,7 +252,7 @@ fun formatTokens(n: Long): String = when {
 }
 
 @Composable
-private fun EmptyState(needsSetup: Boolean, onSettings: () -> Unit, onPrompt: (String) -> Unit) {
+private fun EmptyState(needsSetup: Boolean, onSettings: () -> Unit) {
     Column(
         Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(24.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -271,20 +270,6 @@ private fun EmptyState(needsSetup: Boolean, onSettings: () -> Unit, onPrompt: (S
             )
             Spacer(Modifier.size(12.dp))
             Button(onClick = onSettings) { Text("Set up API") }
-        } else {
-            listOf(
-                "What were the NBA scores last night?",
-                "Summarize today's top tech news",
-                "Explain how foldable phone screens work",
-                "Help me write a polite email to my landlord",
-            ).forEach { p ->
-                OutlinedCard(
-                    onClick = { onPrompt(p) },
-                    modifier = Modifier.fillMaxWidth().widthIn(max = 520.dp).padding(vertical = 4.dp),
-                ) {
-                    Text(p, modifier = Modifier.padding(14.dp), style = MaterialTheme.typography.bodyMedium)
-                }
-            }
         }
     }
 }

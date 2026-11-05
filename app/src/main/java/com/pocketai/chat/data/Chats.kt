@@ -50,22 +50,24 @@ data class ReplyUsage(
     val seconds: Int = 0,
     /** The provider's price multiplier for this model when the reply was written (NT Media), else null. */
     val multiplier: Double? = null,
-    /** Which API answered: its saved name, address host and key hint ("…0uax"). Null before 1.10. */
+    /** Which API answered: its saved name (e.g. "NT Media") and address host. Null before 1.10. */
     val apiName: String? = null,
     val apiHost: String? = null,
+    /** Only written by 1.10; no longer used. */
     val keyHint: String? = null,
 ) {
     val total: Long get() = input + output
     /** Tokens as the provider bills them (total × multiplier); equals [total] when there's no multiplier. */
     val billed: Long get() = ModelRates.billed(total, multiplier)
 
-    /** Groups replies by API key. Replies from before 1.10 only know NT Media (from the multiplier) or nothing. */
-    val keyGroup: String
-        get() = when {
-            apiHost != null -> "$apiHost|${keyHint.orEmpty()}"
-            multiplier != null -> "api.ntmedia.store|"
-            else -> "?"
-        }
+    /** Groups replies by API name. Replies from before 1.10 only know NT Media (from the multiplier) or nothing. */
+    val apiGroup: String
+        get() = apiName ?: if (multiplier != null) NT_MEDIA_OLD else EARLIER
+
+    companion object {
+        const val NT_MEDIA_OLD = "\u0000ntmedia"
+        const val EARLIER = "\u0000earlier"
+    }
 }
 
 @Serializable

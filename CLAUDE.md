@@ -58,7 +58,13 @@ from drawing, so `BrowserPane` only attaches the WebView once a URL is open.
   `Version/x` stripped so sites serve normal mobile pages; `textZoom` fixed at 100 by default because following
   the phone's font scale made text overflow its boxes), `AdBlocker` (StevenBlack hosts list cached weekly +
   built-in list, subresources only via `shouldInterceptRequest`; injected CSS hides Reddit/Google/GPT ad boxes;
-  auto-dismisses "allow ads" JS alerts/confirms),
+  auto-dismisses "allow ads" JS alerts/confirms; NAG_JS removes in-page anti-adblock overlays + backdrop and
+  restores scrolling, only when their text matches; hides SCMP-style empty `AdSlot` boxes and sticky "adhesion" ads).
+  Page text for the AI: `assets/readability/` (Mozilla Readability 0.5.0, Apache-2.0) + `extract.js` → article
+  only when `isProbablyReaderable` (CJK-lowered thresholds; it crashes on RTHK, so guarded) or the page declares
+  itself an article (og:type / article:published_time / <article> / JSON-LD); else `innerText`. Tested in Playwright:
+  RTHK 3,326→221 chars, hk01/NYPost/BBC −30–40%, RTHK list/Reddit unchanged. Sidebar headlines leaked into
+  summaries before.
   `SettingsScreen` (NovelAI-style saved APIs + "Save this API setting?" prompt + Load models),
   `UsageScreen` (per-reply and overall token breakdown; filter chips per API *name* — `ReplyUsage.apiName`
   since 1.10; the owner wants names only, no key hints), `Markdown` (small renderer).
@@ -82,8 +88,11 @@ from drawing, so `BrowserPane` only attaches the WebView once a URL is open.
   shared pages as possibly outdated. Before: 4/4 runs answered "who did Makhachev last beat" from a stale
   article without searching; after: 4/4 searched "… last fight November 2026" and answered from the newest
   result. The no-tools final step gets an "answer now" note (DeepSeek otherwise prints raw DSML tool calls).
-- Replies are in the user's language; foreign-language source text is translated (original in brackets only
-  when it matters). Tested: without the rule a Cantonese video summary came back fully in Chinese 1 of 2 runs.
+- Replies are in the language of the user's typed words ("Summary" = English), never the source's; foreign text is
+  translated (original in brackets only when it matters; never guess name spellings). Without the explicit
+  "one-word request" wording, a Chinese article + "Summary" got a Chinese reply 2 of 2 times.
+- Summaries: journalist-style brief (what happened + why it matters, key-detail bullets, what's unclear), not a
+  sentence-by-sentence translation; only the page's main content; no added facts.
 - Token policy: don't waste, don't skimp. Chat text is always re-sent in full; raw web results only for the
   latest answer; photos/shared pages only for the last 4 user messages; system prompt has date only so
   provider prompt caching works. Each reply records tokens, steps, searches, pages, seconds.

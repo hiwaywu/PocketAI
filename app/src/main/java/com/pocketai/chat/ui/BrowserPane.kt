@@ -396,10 +396,30 @@ class BrowserController(private val context: Context) {
         runCatching { ctx.startActivity(Intent.createChooser(Intent(Intent.ACTION_VIEW, Uri.parse(url)), null)) }
     }
 
-    /** Reads the visible text of the open page (works on JavaScript-heavy pages too). */
+    /** Mozilla Readability (as in Firefox Reader View) + our extract script, read once from assets. */
+    private val extractJs: String by lazy {
+        listOf("Readability.js", "Readability-readerable.js", "extract.js").joinToString("\n") { f ->
+            context.assets.open("readability/$f").bufferedReader().use { it.readText() }
+        }
+    }
+
+    /**
+     * Text of the open page for the AI. On article pages only the article itself (no menus, sidebars or
+     * "other headlines", which got mixed into summaries before, and far fewer tokens); on other pages
+     * (search results, feeds, forums) all visible text.
+     */
     fun extractPage(onResult: (String) -> Unit) {
-        webView.evaluateJavascript("(function(){return document.body ? document.body.innerText : ''})()") { res ->
-            onResult(runCatching { Json.decodeFromString<String>(res) }.getOrDefault(""))
+        webView.evaluateJavascript(extractJs) { res ->
+            val text = runCatching {
+                val obj = Json.parseToJsonElement(Json.decodeFromString<String>(res)) as kotlinx.serialization.json.JsonObject
+                val body = (obj["text"] as? kotlinx.serialization.json.JsonPrimitive)?.content.orEmpty()
+                val article = (obj["article"] as? kotlinx.serialization.json.JsonPrimitive)?.content == "true"
+                val published = (obj["published"] as? kotlinx.serialization.json.JsonPrimitive)?.content.orEmpty()
+                if (!article) body
+                else "(Main article text only: menus, sidebars and other headlines on the page were left out.)\n" +
+                    (if (published.isNotBlank()) "Published: $published\n" else "") + "\n" + body
+            }.getOrDefault("")
+            onResult(text)
         }
     }
 

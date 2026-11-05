@@ -87,12 +87,48 @@ object AdBlocker {
             // Common ad slots (Google Ad Manager / AdSense, Taboola, Outbrain)
             "ins.adsbygoogle,.adsbygoogle,[id^=\"google_ads_iframe\"],[id^=\"div-gpt-ad\"],[data-google-query-id]," +
             "iframe[src*=\"doubleclick.net\"],iframe[src*=\"googlesyndication.com\"],iframe[src*=\"amazon-adsystem.com\"]," +
-            "[id^=\"taboola\"],.trc_related_container,.OUTBRAIN,[data-ad-slot],[aria-label=\"Advertisement\"]" +
+            "[id^=\"taboola\"],.trc_related_container,.OUTBRAIN,[data-ad-slot],[aria-label=\"Advertisement\"]," +
+            // Empty reserved ad boxes (e.g. SCMP's gray "AdSlot" containers)
+            "[data-qa*=\"AdSlot\"],[data-qa*=\"AdsSlot\"],[data-slot-collapse],[class*=\"ad-with-size\"]," +
+            // Sticky "adhesion" ads stuck to the bottom of the screen (e.g. NY Daily News)
+            "#mobile-adhesion,[id*=\"adhesion\"],[class*=\"adhesion\"]" +
             "{display:none!important}"
 
-    /** Adds the ad-hiding stylesheet once per page; it also applies to ads inserted later. */
+    /**
+     * Removes "you're using an ad blocker / please allow ads" overlays built into the page (they appear in
+     * WebViews even without blocking, because ads don't load there), plus their dark backdrop, and turns page
+     * scrolling back on. Only overlays whose text matches are touched. Watches the page for a minute.
+     */
+    private const val NAG_JS = """
+(function(){
+  if (window.__pocketAiNag) return; window.__pocketAiNag = 1;
+  var re = /(using an? ad ?blocker|disable (your )?ad ?block|turn off (your )?ad ?block|allow ads|whitelist (us|our site|this site)|ad ?block(er)? (is )?detected|允許廣告|允许广告|廣告攔截|广告拦截|關閉.{0,6}廣告|关闭.{0,6}广告)/i;
+  function covers(e) { var r = e.getBoundingClientRect(); return r.width >= innerWidth * 0.9 && r.height >= innerHeight * 0.9; }
+  function sweep() {
+    var found = false, layers = [];
+    document.querySelectorAll('body > *, body > * > *, body > * > * > *, body > * > * > * > *').forEach(function (e) {
+      var cs = getComputedStyle(e);
+      if (cs.position !== 'fixed' && cs.position !== 'absolute') return;
+      layers.push(e);
+      if (re.test((e.innerText || '').slice(0, 3000))) { e.remove(); found = true; }
+    });
+    if (!found) return;
+    layers.forEach(function (e) { if (e.isConnected && covers(e) && !(e.innerText || '').trim()) e.remove(); });
+    [document.documentElement, document.body].forEach(function (e) {
+      if (!e) return;
+      e.style.setProperty('overflow', 'auto', 'important');
+      if (getComputedStyle(e).position === 'fixed') e.style.setProperty('position', 'static', 'important');
+    });
+  }
+  sweep();
+  var t = null, obs = new MutationObserver(function () { clearTimeout(t); t = setTimeout(sweep, 400); });
+  obs.observe(document.documentElement, { childList: true, subtree: true });
+  setTimeout(function () { obs.disconnect(); }, 60000);
+})();"""
+
+    /** Adds the ad-hiding stylesheet once per page (it also applies to ads inserted later) and the overlay remover. */
     val HIDE_ADS_JS =
         "(function(){if(document.getElementById('pocketai-adblock'))return;" +
             "var s=document.createElement('style');s.id='pocketai-adblock';s.textContent='" + HIDE_CSS.replace("'", "\\'") + "';" +
-            "(document.head||document.documentElement).appendChild(s);})()"
+            "(document.head||document.documentElement).appendChild(s);})();" + NAG_JS
 }

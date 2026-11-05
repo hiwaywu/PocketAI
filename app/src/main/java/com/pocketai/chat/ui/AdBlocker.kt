@@ -58,16 +58,49 @@ object AdBlocker {
         }
     }
 
-    /** True if [host] or one of its parent domains is a known ad/tracker server. */
-    fun isBlocked(host: String?): Boolean {
-        var h = host?.lowercase() ?: return false
+    /**
+     * Services pages need to work, which the hosts list blocks anyway: bot checks (NYT's DataDome box stayed
+     * empty and the page stuck), subscription/paywall popups (Piano — NY Daily News was left dimmed and stuck),
+     * cookie-consent popups and captchas. Never blocked, including their subdomains.
+     */
+    private val NEVER_BLOCK = setOf(
+        "datadome.co", "captcha-delivery.com", "challenges.cloudflare.com", "recaptcha.net", "hcaptcha.com",
+        "arkoselabs.com", "perimeterx.net", "px-cdn.net", "px-cloud.net", "gstatic.com",
+        "tinypass.com", "piano.io", "npttech.com", "cxense.com",
+        "cookielaw.org", "onetrust.com", "privacy-mgmt.com", "sourcepoint.com", "sp-prod.net", "consensu.org",
+        "didomi.io", "osano.com", "trustarc.com", "usercentrics.eu", "cookiebot.com", "fundingchoicesmessages.google.com",
+    )
+
+    private fun matches(host: String, set: Set<String>): Boolean {
+        var h = host
         while (true) {
-            if (h in domains) return true
+            if (h in set) return true
             val dot = h.indexOf('.')
             if (dot < 0) return false
             h = h.substring(dot + 1)
             if (!h.contains('.')) return false
         }
+    }
+
+    /** "dd.nytimes.com" → "nytimes.com", "news.rthk.hk" → "rthk.hk", "www.bbc.co.uk" → "bbc.co.uk". */
+    fun siteOf(host: String): String {
+        val parts = host.lowercase().trimEnd('.').split('.')
+        if (parts.size <= 2) return parts.joinToString(".")
+        val secondLevel = parts[parts.size - 2]
+        val keep = if (parts.last().length == 2 && secondLevel in setOf("com", "co", "org", "net", "gov", "edu", "ac", "ne", "or")) 3 else 2
+        return parts.takeLast(keep).joinToString(".")
+    }
+
+    /**
+     * True if a request from a page on [pageHost] to [host] should be blocked: [host] (or a parent domain) is
+     * a known ad/tracker server, it isn't one of the page's own servers (sites break when their own services
+     * are blocked; uBlock-style blockers do the same), and it isn't a service pages need ([NEVER_BLOCK]).
+     */
+    fun isBlocked(host: String?, pageHost: String?): Boolean {
+        val h = host?.lowercase() ?: return false
+        if (!pageHost.isNullOrEmpty() && siteOf(h) == siteOf(pageHost)) return false
+        if (matches(h, NEVER_BLOCK)) return false
+        return matches(h, domains)
     }
 
     private val AD_NAG = Regex(
@@ -125,6 +158,33 @@ object AdBlocker {
   obs.observe(document.documentElement, { childList: true, subtree: true });
   setTimeout(function () { obs.disconnect(); }, 60000);
 })();"""
+
+    /**
+     * ⋮ → Unblock page: removes everything covering the screen (stuck popups, dark backdrops, walls) and turns
+     * scrolling back on, for sites that still get stuck.
+     */
+    const val UNBLOCK_PAGE_JS = """
+(function(){
+  var n = 0;
+  document.querySelectorAll('body *').forEach(function (e) {
+    if (!e.isConnected) return;
+    var cs = getComputedStyle(e);
+    if (cs.position !== 'fixed' && cs.position !== 'sticky' && cs.position !== 'absolute') return;
+    var r = e.getBoundingClientRect(), z = parseInt(cs.zIndex, 10) || 0;
+    // Layers covering most of the screen (backdrops, walls)…
+    var cover = r.width >= innerWidth * 0.8 && r.height >= innerHeight * 0.5 && z > 0;
+    // …and popup boxes floating mid-screen on top of everything (not headers stuck to the top edge).
+    var popup = cs.position === 'fixed' && z >= 1000 && r.width >= innerWidth * 0.5 && r.top > 40 && r.bottom < innerHeight - 10;
+    if (cover || popup) { e.remove(); n++; }
+  });
+  [document.documentElement, document.body].forEach(function (e) {
+    if (!e) return;
+    e.style.setProperty('overflow', 'auto', 'important');
+    e.style.setProperty('filter', 'none', 'important');
+    if (getComputedStyle(e).position === 'fixed') e.style.setProperty('position', 'static', 'important');
+  });
+  return n;
+})()"""
 
     /** Adds the ad-hiding stylesheet once per page (it also applies to ads inserted later) and the overlay remover. */
     val HIDE_ADS_JS =

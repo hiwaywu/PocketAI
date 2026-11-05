@@ -71,6 +71,11 @@ from drawing, so `BrowserPane` only attaches the WebView once a URL is open.
   NT Media injects its own identity prompt; OpenCode doesn't. In Nov 2026 tests several NT Media "models"
   (Claude/GPT/Gemini/DeepSeek names) gave near-identical answers, searches and `call_00_…` tool-call ids,
   which hints they share one backend — unproven.
+- Freshness (1.9): the web-tools prompt tells the model its knowledge is old, to search "latest/last/next"
+  questions with an open, dated query (not the answer it remembers), trust the newest dated results, and treat
+  shared pages as possibly outdated. Before: 4/4 runs answered "who did Makhachev last beat" from a stale
+  article without searching; after: 4/4 searched "… last fight November 2026" and answered from the newest
+  result. The no-tools final step gets an "answer now" note (DeepSeek otherwise prints raw DSML tool calls).
 - Token policy: don't waste, don't skimp. Chat text is always re-sent in full; raw web results only for the
   latest answer; photos/shared pages only for the last 4 user messages; system prompt has date only so
   provider prompt caching works. Each reply records tokens, steps, searches, pages, seconds.

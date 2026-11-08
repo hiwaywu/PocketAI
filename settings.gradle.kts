@@ -14,8 +14,6 @@ dependencyResolutionManagement {
         google()
         maven("https://maven-central.storage-download.googleapis.com/maven2/")
         mavenCentral()
-        // GeckoView (Firefox's engine) for the in-app browser.
-        maven("https://maven.mozilla.org/maven2/")
     }
 }
 rootProject.name = "PocketAI"

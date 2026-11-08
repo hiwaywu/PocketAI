@@ -30,7 +30,7 @@ data class Source(val title: String, val url: String)
 /**
  * What one AI reply cost. Input/output/cached come from the provider; the four est* fields are
  * the app's estimate of how the input tokens split between chat history, web results, photos
- * and pages shared from the browser (scaled so they add up to the real input total).
+ * and pages shared from the old built-in browser (scaled so they add up to the real input total).
  */
 @Serializable
 data class ReplyUsage(
@@ -98,6 +98,8 @@ data class Conversation(
     val updatedAt: Long = System.currentTimeMillis(),
     val promptTokens: Long = 0,
     val completionTokens: Long = 0,
+    /** Pinned chats stay at the top of the chat list (2.2). */
+    val pinned: Boolean = false,
 )
 
 class ChatRepository(context: Context) {

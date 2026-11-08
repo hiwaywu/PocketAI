@@ -31,10 +31,8 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -56,8 +54,6 @@ import java.util.Date
 import java.util.Locale
 import java.util.concurrent.TimeUnit
 
-data class PageContext(val title: String, val url: String, val text: String)
-
 data class UiState(
     val settings: AppSettings,
     val current: Conversation = Conversation(),
@@ -67,7 +63,6 @@ data class UiState(
     /** Progress line ("Searching: …") per running chat. */
     val statuses: Map<String, String> = emptyMap(),
     val pendingImages: List<String> = emptyList(),
-    val pendingPage: PageContext? = null,
     val notice: String? = null,
     val composerPrefill: String? = null,
 ) {
@@ -91,9 +86,6 @@ class ChatViewModel(private val app: Application) : AndroidViewModel(app) {
 
     private val _state = MutableStateFlow(UiState(settings = store.load()))
     val state: StateFlow<UiState> = _state.asStateFlow()
-
-    private val _openUrl = MutableSharedFlow<String>(extraBufferCapacity = 4)
-    val openUrl = _openUrl.asSharedFlow()
 
     private val jobs = mutableMapOf<String, Job>()
 
@@ -223,10 +215,6 @@ class ChatViewModel(private val app: Application) : AndroidViewModel(app) {
     fun notice(text: String) = _state.update { it.copy(notice = text) }
     fun dismissNotice() = _state.update { it.copy(notice = null) }
 
-    fun openInBrowser(url: String) {
-        _openUrl.tryEmit(url)
-    }
-
     /**
      * Puts the open chat into the chat list before switching away. A reply still being written
      * keeps going and keeps updating that chat in the list.
@@ -241,7 +229,7 @@ class ChatViewModel(private val app: Application) : AndroidViewModel(app) {
 
     fun newChat() {
         stashCurrent()
-        _state.update { it.copy(current = Conversation(), pendingImages = emptyList(), pendingPage = null) }
+        _state.update { it.copy(current = Conversation(), pendingImages = emptyList()) }
     }
 
     fun openChat(id: String) {
@@ -263,6 +251,23 @@ class ChatViewModel(private val app: Application) : AndroidViewModel(app) {
         }
     }
 
+    fun renameChat(id: String, title: String) {
+        val t = title.trim().ifBlank { return }
+        editChat(id) { it.copy(title = t) }
+    }
+
+    /** Pinned chats stay at the top of the chat list. */
+    fun togglePin(id: String) = editChat(id) { it.copy(pinned = !it.pinned) }
+
+    /** Changes a chat's details (not its messages or date) and saves it. */
+    private fun editChat(id: String, f: (Conversation) -> Conversation) {
+        if (convOf(id) == null) return
+        updateConv(id, f)
+        val c = convOf(id) ?: return
+        _state.update { st -> st.copy(conversations = st.conversations.map { if (it.id == id) c else it }) }
+        if (c.messages.isNotEmpty()) viewModelScope.launch(Dispatchers.IO) { repo.save(c) }
+    }
+
     fun addImages(uris: List<Uri>) {
         viewModelScope.launch(Dispatchers.IO) {
             val files = uris.mapNotNull { ImageUtil.importImage(app, it, repo.imageDir)?.absolutePath }
@@ -276,27 +281,6 @@ class ChatViewModel(private val app: Application) : AndroidViewModel(app) {
         _state.update { it.copy(pendingImages = it.pendingImages - path) }
     }
 
-    /**
-     * The browser's message bar: sends [question] with the open page's text attached
-     * (or as a plain message when no page is open). Returns false if it couldn't be sent.
-     */
-    fun askFromBrowser(title: String, url: String, pageText: String?, question: String): Boolean {
-        if (state.value.streaming) {
-            notice("Wait for the current reply to finish (or stop it) first.")
-            return false
-        }
-        if (pageText != null) {
-            if (pageText.isBlank()) {
-                notice("Couldn't read any text on this page yet — wait for it to load and try again.")
-                return false
-            }
-            _state.update { it.copy(pendingPage = PageContext(title.ifBlank { url }, url, pageText.take(MAX_PAGE_CHARS))) }
-        }
-        return send(question)
-    }
-
-    fun clearPage() = _state.update { it.copy(pendingPage = null) }
-
     fun consumePrefill() = _state.update { it.copy(composerPrefill = null) }
 
     /** Something was shared to Pocket AI from another app (Firefox, YouTube, Gallery…). */
@@ -307,8 +291,7 @@ class ChatViewModel(private val app: Application) : AndroidViewModel(app) {
         val url = Regex("""https?://\S+""").find(shared)?.value?.trimEnd('.', ',', ')', '"', '\'')
         when {
             url != null -> {
-                val isVideo = Regex("""youtube\.com|youtu\.be""", RegexOption.IGNORE_CASE).containsMatchIn(url)
-                val prompt = if (isVideo) "Summarize this YouTube video: $url" else "Summarize this page: $url"
+                val prompt = summarizePrompt(url)
                 if (!send(prompt)) _state.update { it.copy(composerPrefill = prompt) }
             }
             shared.isNotEmpty() -> _state.update {
@@ -326,18 +309,44 @@ class ChatViewModel(private val app: Application) : AndroidViewModel(app) {
             return false
         }
         val trimmed = text.trim()
-        if (trimmed.isEmpty() && st.pendingImages.isEmpty() && st.pendingPage == null) return false
-        val page = st.pendingPage
-        val user = ChatMessage(
-            role = "user", text = trimmed, images = st.pendingImages,
-            pageTitle = page?.title, pageUrl = page?.url, pageText = page?.text,
-        )
+        if (trimmed.isEmpty() && st.pendingImages.isEmpty()) return false
+        val user = ChatMessage(role = "user", text = trimmed, images = st.pendingImages)
         val conv = st.current.copy(
             messages = st.current.messages + user,
             title = if (st.current.messages.isEmpty()) makeTitle(user) else st.current.title,
             updatedAt = System.currentTimeMillis(),
         )
-        _state.update { it.copy(pendingImages = emptyList(), pendingPage = null) }
+        _state.update { it.copy(pendingImages = emptyList()) }
+        runAssistant(conv)
+        return true
+    }
+
+    /**
+     * Replaces one of your messages with [newText] and answers again from there; everything after it
+     * is dropped (like editing a message in ChatGPT). Photos on that message are kept.
+     */
+    fun editAndResend(msgId: String, newText: String): Boolean {
+        val st = state.value
+        if (st.streaming) {
+            notice("Wait for the current reply to finish (or stop it) first.")
+            return false
+        }
+        if (!st.settings.isConfigured) {
+            notice("Set up an API first: Settings → API address, key, and model.")
+            return false
+        }
+        val msgs = st.current.messages
+        val i = msgs.indexOfFirst { it.id == msgId && it.role == "user" }
+        if (i < 0) return false
+        val old = msgs[i]
+        val trimmed = newText.trim()
+        if (trimmed.isEmpty() && old.images.isEmpty() && old.pageText == null) return false
+        val edited = old.copy(id = java.util.UUID.randomUUID().toString(), text = trimmed)
+        val conv = st.current.copy(
+            messages = msgs.take(i) + edited,
+            title = if (i == 0) makeTitle(edited) else st.current.title,
+            updatedAt = System.currentTimeMillis(),
+        )
         runAssistant(conv)
         return true
     }
@@ -352,6 +361,12 @@ class ChatViewModel(private val app: Application) : AndroidViewModel(app) {
         val msgs = st.current.messages
         if (msgs.lastOrNull()?.role == "assistant") runAssistant(st.current.copy(messages = msgs.dropLast(1)))
         else if (msgs.lastOrNull()?.role == "user") runAssistant(st.current)
+    }
+
+    private fun summarizePrompt(url: String): String = when {
+        Regex("""youtube\.com|youtu\.be""", RegexOption.IGNORE_CASE).containsMatchIn(url) -> "Summarize this YouTube video: $url"
+        com.pocketai.chat.api.Reddit.isReddit(url) -> "Summarize this Reddit thread: $url"
+        else -> "Summarize this page: $url"
     }
 
     private fun makeTitle(m: ChatMessage): String {
@@ -484,9 +499,6 @@ class ChatViewModel(private val app: Application) : AndroidViewModel(app) {
                 }
                 if (allowTools) put("tools", WebTools.TOOL_DEFS)
             }
-            updateMsg(convId, msgId) { m ->
-                if (m.text.isNotBlank() && !m.text.endsWith("\n\n")) m.copy(text = m.text.trimEnd() + "\n\n") else m
-            }
             if (round > 1) setStatus(convId, "Reading results…")
 
             val res: StreamResult = try {
@@ -522,6 +534,9 @@ class ChatViewModel(private val app: Application) : AndroidViewModel(app) {
                 break
             }
 
+            // Text written before a tool call is narration ("I'll open that page for you."); the status line
+            // already says what's happening, so it's taken off the screen (the model still gets it back).
+            updateMsg(convId, msgId) { it.copy(text = "") }
             val calls = res.toolCalls.mapIndexed { i, tc -> if (tc.id.isBlank()) tc.copy(id = "call_${round}_$i") else tc }
             searches += calls.count { it.name == "web_search" }
             pages += calls.count { it.name == "fetch_url" }
@@ -551,6 +566,9 @@ class ChatViewModel(private val app: Application) : AndroidViewModel(app) {
             }
         }
 
+        if (finalContent.isBlank() && convOf(convId)?.messages?.firstOrNull { it.id == msgId }?.text.isNullOrBlank()) {
+            updateMsg(convId, msgId) { it.copy(text = "_(The model sent an empty reply. Tap ↻ to try again.)_") }
+        }
         // Scale the estimate so the parts add up to what the provider actually billed.
         val estTotal = (estHistory + estWeb + estPhotos + estShared).coerceAtLeast(1)
         val reported = input > 0
@@ -648,8 +666,9 @@ class ChatViewModel(private val app: Application) : AndroidViewModel(app) {
                 updateMsg(convId, msgId) { it.copy(toolEvents = it.toolEvents + ev) }
                 setStatus(convId, "Reading ${ev.label}")
                 try {
-                    val page = web.fetch(url, s.deepSeekKey.takeIf { s.searchEngine == SearchEngine.DEEPSEEK })
+                    val page = web.fetch(url, s.deepSeekKey.takeIf { s.searchEngine == SearchEngine.DEEPSEEK }) { setStatus(convId, it) }
                     sources += Source(page.title, page.url)
+                    nameAfterPage(convId, page.title)
                     "Title: ${page.title}\nURL: ${page.url}\n\n${page.text}"
                 } catch (e: CancellationException) {
                     throw e
@@ -659,6 +678,19 @@ class ChatViewModel(private val app: Application) : AndroidViewModel(app) {
                 }
             }
             else -> "Error: unknown tool ${tc.name}."
+        }
+    }
+
+    /**
+     * A chat started with "Summarize this page: <link>" is renamed after the page it read, so the chat
+     * list shows "Teaching how to split a McDonald's breakfast…" instead of the link.
+     */
+    private fun nameAfterPage(convId: String, pageTitle: String) {
+        val t = pageTitle.replace(Regex("""\s+"""), " ").trim()
+        if (t.isEmpty() || t.startsWith("http")) return
+        updateConv(convId) { c ->
+            val auto = c.title.startsWith("Summarize this ") && c.messages.count { it.role == "user" } == 1
+            if (auto) c.copy(title = if (t.length > 60) t.take(58).trimEnd() + "…" else t) else c
         }
     }
 
@@ -693,13 +725,20 @@ class ChatViewModel(private val app: Application) : AndroidViewModel(app) {
             "Don't quote foreign-language text on its own: translate it. If the original wording matters (a name, " +
             "title or key quote), give the translation first and the original after it in brackets; never guess the " +
             "English spelling of a name you're unsure of." +
-            // Summaries used to follow the source sentence by sentence and read like a stiff translation.
-            "\nWhen you summarize an article, video or page: write it the way a sharp journalist would brief a " +
-            "friend, in natural language, not a sentence-by-sentence translation and not in the source's order or " +
-            "officialese. Start with one or two sentences on what happened and why it matters. Then give the key " +
-            "details as short bullets: who, what, when, where, numbers, money, dates and notable quotes, keeping " +
-            "every concrete specific and dropping filler. End with what happens next or what's still unclear, if " +
-            "relevant. Use only the page's main content and don't add facts the source doesn't state."
+            // Summaries used to follow the source sentence by sentence and read like a stiff translation; 2.2 adds
+            // formats per kind of content (Reddit threads and videos get detailed notes with their page text).
+            "\nWhen you summarize a page, article, video or thread (a link sent on its own means \"summarize this\"): " +
+            "write the way a sharp journalist briefs a friend, in natural language, not a sentence-by-sentence " +
+            "translation and not in the source's order or officialese. Open with a bold one- or two-sentence TL;DR " +
+            "of what happened or what it says and why it matters. Then the key details as short bullets: who, what, " +
+            "when, where, numbers, money, dates and notable quotes, keeping every concrete specific and dropping " +
+            "filler. Fit the shape to the content: news: what's next or still unclear; opinion or analysis: the " +
+            "argument and its evidence, labelled as opinion; how-to or recipe: the steps or ingredients; product or " +
+            "deal: what it is, price, pros and cons; discussion thread: what was posted, then what people say and " +
+            "the overall mood. Scale the length to the source (a short post gets a few lines). Use only what the " +
+            "source says and don't add facts; if something important couldn't be read (paywall, video, missing " +
+            "transcript), say so in one short line. This is a phone screen: short paragraphs and bullet lists, no " +
+            "wide tables. Page text may start with a [Pocket AI: …] note on how to summarize that kind of page; follow it."
         if (s.webTools) {
             system += "\nYou can use the web_search and fetch_url tools. Use them whenever a question needs current " +
                 "or specific information (news, scores, prices, schedules) or the user shares a link. " +
@@ -707,7 +746,8 @@ class ChatViewModel(private val app: Application) : AndroidViewModel(app) {
                 "'yesterday', 'this weekend') into exact dates using today's date; do ONE precise search first; answer " +
                 "from the search summaries when they are enough; open at most 1-3 pages, preferring official or major " +
                 "sites (e.g. ESPN, NBA.com, AP, Reuters); never repeat near-identical searches. " +
-                "When you use information from the web, cite the sources as Markdown links. " +
+                "When you use information from the web, cite the sources as Markdown links. Don't announce what you're " +
+                "about to do (\"I'll open that page\"); just call the tool, then answer. " +
                 // Without this, models answer "latest/last" questions from their (old) training or from an old
                 // shared article, or search for the answer they already believe (e.g. a 2025 fight in 2026).
                 "Your own knowledge stops well before today, so for anything that changes over time (latest, last, " +
@@ -734,7 +774,7 @@ class ChatViewModel(private val app: Application) : AndroidViewModel(app) {
                     val note = StringBuilder()
                     if (m.pageText != null) {
                         if (keepMedia) {
-                            shared.append("[The user is sharing a web page from the in-app browser]\n")
+                            shared.append("[The user is sharing a web page]\n")
                             shared.append("Title: ${m.pageTitle}\nURL: ${m.pageUrl}\n<page_content>\n${m.pageText}\n</page_content>\n\n")
                         } else {
                             note.append("[Earlier the user shared the page \"${m.pageTitle}\" (${m.pageUrl}); its text isn't re-sent.]\n")

@@ -8,6 +8,13 @@
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
+    <!-- Android 11+ hides other apps unless declared: the phone's text-to-speech engine reads replies aloud. -->
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.TTS_SERVICE" />
+        </intent>
+    </queries>
+
     <application
         android:name=".PocketApp"
         android:allowBackup="false"
@@ -19,7 +26,7 @@
         android:usesCleartextTraffic="true"
         android:theme="@style/Theme.PocketAI">
 
-        <!-- configChanges keeps the chat and browser alive when the Fold opens or closes. -->
+        <!-- configChanges keeps the chat (and a reply being written) on screen when the Fold opens or closes. -->
         <activity
             android:name=".MainActivity"
             android:exported="true"

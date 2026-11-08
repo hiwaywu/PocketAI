@@ -8,7 +8,6 @@ plugins {
 
 android {
     namespace = "com.pocketai.chat"
-    // GeckoView and its AndroidX dependencies need the Android 17 SDK (37.2) to compile against.
     compileSdk {
         version = release(37) { minorApiLevel = 2 }
     }
@@ -17,10 +16,8 @@ android {
         applicationId = "com.pocketai.chat"
         minSdk = 26
         targetSdk = 35
-        versionCode = 16
-        versionName = "2.1"
-        // The browser engine ships only for 64-bit ARM (the Fold), so drop other chip types' libraries too.
-        ndk { abiFilters += listOf("arm64-v8a") }
+        versionCode = 17
+        versionName = "2.2"
     }
 
     // One permanent release key so every build can install over the previous version without losing
@@ -52,11 +49,6 @@ android {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
-    // Store native libraries compressed: the browser engine is ~150 MB uncompressed and ~55 MB compressed;
-    // Android unpacks it once at install.
-    packaging {
-        jniLibs { useLegacyPackaging = true }
-    }
     buildFeatures {
         compose = true
         buildConfig = true
@@ -80,7 +72,10 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.12.0")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("org.jsoup:jsoup:1.18.3")
-    // Firefox's engine (GeckoView) for the in-app browser, so it runs Firefox add-ons like uBlock Origin.
-    // arm64 only (the Galaxy Z Fold 7); the all-ABI package would roughly triple the APK size.
-    implementation("org.mozilla.geckoview:geckoview-arm64-v8a:159.0.20261102144711")
+    // Mozilla's Readability (Kotlin port): pulls just the article out of a page, like Firefox Reader View.
+    implementation("net.dankito.readability4j:readability4j:1.0.8")
+    // Links open in a Chrome Custom Tab on top of the chat (the built-in browser was removed in 2.2).
+    implementation("androidx.browser:browser:1.10.0")
+
+    testImplementation("junit:junit:4.13.2")
 }

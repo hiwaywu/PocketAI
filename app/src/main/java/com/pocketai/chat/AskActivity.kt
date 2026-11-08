@@ -20,6 +20,8 @@ import com.pocketai.chat.ui.AskPanel
 class AskActivity : ComponentActivity() {
     private val app: PocketApp get() = application as PocketApp
     private var capture by mutableStateOf<ScreenCapture?>(null)
+    /** True once [capture] went out with a question (follow-ups in the same panel don't re-send it). */
+    private var captureSent by mutableStateOf(false)
     private var chatId by mutableStateOf<String?>(null)
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -31,8 +33,17 @@ class AskActivity : ComponentActivity() {
                 AskPanel(
                     vm = app.chat,
                     capture = capture,
+                    captureSent = captureSent,
                     chatId = chatId,
-                    onChat = { chatId = it },
+                    onSent = { id ->
+                        chatId = id
+                        captureSent = true
+                        rememberPanelChat(id)
+                    },
+                    onNewChat = {
+                        chatId = null
+                        captureSent = false
+                    },
                     onClose = { finish() },
                     onOpenApp = ::openInApp,
                 )
@@ -57,7 +68,9 @@ class AskActivity : ComponentActivity() {
     }
 
     private fun take(intent: Intent?) {
-        chatId = null
+        // Tapping the button again within a while continues the same conversation instead of starting over.
+        chatId = recentPanelChat()
+        captureSent = false
         capture = if (intent?.action == Intent.ACTION_PROCESS_TEXT) {
             val text = intent.getCharSequenceExtra(Intent.EXTRA_PROCESS_TEXT)?.toString().orEmpty()
             val from = referrer?.host ?: callingPackage
@@ -66,6 +79,18 @@ class AskActivity : ComponentActivity() {
         } else {
             app.pendingCapture.also { app.pendingCapture = null }
         }
+    }
+
+    private val prefs get() = getSharedPreferences("ui", MODE_PRIVATE)
+
+    private fun recentPanelChat(): String? {
+        val id = prefs.getString("panelChat", null) ?: return null
+        val at = prefs.getLong("panelChatAt", 0)
+        return id.takeIf { System.currentTimeMillis() - at < CONTINUE_MS }
+    }
+
+    private fun rememberPanelChat(id: String) {
+        prefs.edit().putString("panelChat", id).putLong("panelChatAt", System.currentTimeMillis()).apply()
     }
 
     /** Continues in the full app, in this chat. */
@@ -80,5 +105,7 @@ class AskActivity : ComponentActivity() {
 
     companion object {
         const val ACTION_ASK_SCREEN = "com.pocketai.chat.ASK_SCREEN"
+        /** How long after the last question the button keeps continuing the same chat. */
+        private const val CONTINUE_MS = 30 * 60_000L
     }
 }

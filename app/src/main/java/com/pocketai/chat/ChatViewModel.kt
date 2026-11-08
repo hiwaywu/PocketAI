@@ -336,9 +336,7 @@ class ChatViewModel(private val app: Application) : AndroidViewModel(app) {
      */
     fun askAbout(capture: com.pocketai.chat.screen.ScreenCapture?, question: String): String? {
         newChat()
-        val page = capture?.takeIf { it.text.isNotBlank() }?.let {
-            PageContext(it.label, it.url, listOfNotNull(it.note, it.text).joinToString("\n\n"), it.kind)
-        }
+        val page = pageOf(capture)
         val name = capture?.appName?.let { app ->
             val q = question.trim().lineSequence().firstOrNull().orEmpty()
             "$app: " + if (q.length > 40) q.take(38).trimEnd() + "…" else q
@@ -346,11 +344,21 @@ class ChatViewModel(private val app: Application) : AndroidViewModel(app) {
         return if (send(question, page, name)) state.value.current.id else null
     }
 
-    /** A follow-up question in the panel's chat. */
-    fun askInChat(chatId: String, question: String): Boolean {
-        if (state.value.current.id != chatId) openChat(chatId)
-        if (state.value.current.id != chatId) return false
-        return send(question)
+    private fun pageOf(capture: com.pocketai.chat.screen.ScreenCapture?): PageContext? =
+        capture?.takeIf { it.text.isNotBlank() }?.let {
+            PageContext(it.label, it.url, listOfNotNull(it.note, it.text).joinToString("\n\n"), it.kind)
+        }
+
+    /**
+     * A question in the panel over another app. Continues [chatId] when it still exists (tapping the Pocket AI
+     * button again keeps the conversation going), attaching [capture] if it hasn't been sent yet ([attach]);
+     * otherwise starts a new chat with it. Returns the chat's id, or null if it couldn't be sent.
+     */
+    fun askInPanel(chatId: String?, capture: com.pocketai.chat.screen.ScreenCapture?, attach: Boolean, question: String): String? {
+        val existing = chatId?.let { convOf(it) } ?: return askAbout(capture, question)
+        if (state.value.current.id != existing.id) openChat(existing.id)
+        if (state.value.current.id != existing.id) return askAbout(capture, question)
+        return if (send(question, if (attach) pageOf(capture) else null)) existing.id else null
     }
 
     /** A chat by id, whether it's open in the main app or in the list. */

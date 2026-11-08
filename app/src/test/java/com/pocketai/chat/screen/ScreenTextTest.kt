@@ -63,4 +63,14 @@ class ScreenTextTest {
         assertTrue(ScreenText.isTimestamp("11:35"))
         assertFalse(ScreenText.isTimestamp("2.1k views"))
     }
+
+    @Test fun addressShapes() {
+        assertTrue(ScreenText.looksLikeAddress("scmp.com/tech/big-tech/article/3333333/menlo-report"))
+        assertTrue(ScreenText.looksLikeAddress("https://www.reddit.com/r/x/comments/abc/"))
+        assertTrue(ScreenText.looksLikeAddress("nytimes.com"))
+        assertFalse(ScreenText.looksLikeAddress("Search or enter address"))
+        assertFalse(ScreenText.looksLikeAddress("US\$77.3 billion"))
+        assertFalse(ScreenText.looksLikeAddress("2.1k"))
+        assertFalse(ScreenText.looksLikeAddress("v4.1"))
+    }
 }

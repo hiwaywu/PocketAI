@@ -37,6 +37,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.automirrored.filled.Send
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Mic
@@ -83,8 +84,10 @@ import com.pocketai.chat.screen.ScreenCapture
 fun AskPanel(
     vm: ChatViewModel,
     capture: ScreenCapture?,
+    captureSent: Boolean,
     chatId: String?,
-    onChat: (String) -> Unit,
+    onSent: (String) -> Unit,
+    onNewChat: () -> Unit,
     onClose: () -> Unit,
     onOpenApp: () -> Unit,
 ) {
@@ -109,13 +112,12 @@ fun AskPanel(
     }
 
     fun ask(question: String) {
-        val q = question.trim().ifEmpty { if (hasText) "Summarize this" else return }
-        val ok = if (chatId == null) vm.askAbout(capture, q)?.also(onChat) != null else vm.askInChat(chatId, q)
-        if (ok) {
-            text = ""
-            keyboard?.hide()
-            focus.clearFocus()
-        }
+        val q = question.trim().ifEmpty { if (hasText && !captureSent) "Summarize this" else return }
+        val id = vm.askInPanel(chatId, capture, attach = !captureSent, question = q) ?: return
+        onSent(id)
+        text = ""
+        keyboard?.hide()
+        focus.clearFocus()
     }
 
     val voice = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { r ->
@@ -161,6 +163,9 @@ fun AskPanel(
                             overflow = TextOverflow.Ellipsis,
                         )
                     }
+                    if (conv != null && conv.messages.isNotEmpty() && !running) {
+                        IconButton(onClick = onNewChat) { Icon(Icons.Filled.Add, "New chat") }
+                    }
                     IconButton(onClick = onOpenApp) { Icon(Icons.AutoMirrored.Filled.OpenInNew, "Continue in Pocket AI") }
                     IconButton(onClick = onClose) { Icon(Icons.Filled.Close, "Close") }
                 }
@@ -170,7 +175,7 @@ fun AskPanel(
                         onClick = { preview = true },
                         label = {
                             Text(
-                                "Read ${formatTokens(capture!!.text.length.toLong())} characters" +
+                                (if (captureSent) "Sent " else "Read ") + "${formatTokens(capture!!.text.length.toLong())} characters" +
                                     if (capture.kind == "selection") " you selected" else " from the screen",
                                 maxLines = 1,
                             )
@@ -187,15 +192,7 @@ fun AskPanel(
                     )
                 }
 
-                if (conv == null || conv.messages.isEmpty()) {
-                    val ideas = panelSuggestions(capture)
-                    if (ideas.isNotEmpty()) {
-                        FlowRow(
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
-                        ) { ideas.forEach { q -> SuggestionChip(onClick = { ask(q) }, label = { Text(q) }) } }
-                    }
-                } else {
+                if (conv != null && conv.messages.isNotEmpty()) {
                     val listState = rememberLazyListState()
                     val msgs = conv.messages
                     val lastId = msgs.last().id
@@ -231,11 +228,20 @@ fun AskPanel(
                     LaunchedEffect(msgs.size) { listState.animateScrollToItem(0) }
                 }
 
+                // One-tap questions while there's a fresh screen to ask about (also when continuing a chat).
+                val ideas = if (captureSent || running) emptyList() else panelSuggestions(capture)
+                if (ideas.isNotEmpty()) {
+                    FlowRow(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+                    ) { ideas.forEach { q -> SuggestionChip(onClick = { ask(q) }, label = { Text(q) }) } }
+                }
+
                 Row(Modifier.padding(start = 12.dp, end = 8.dp, top = 6.dp), verticalAlignment = Alignment.Bottom) {
                     OutlinedTextField(
                         value = text,
                         onValueChange = { text = it },
-                        placeholder = { Text(if (chatId == null && hasText) "Ask about this…" else "Ask a follow-up…") },
+                        placeholder = { Text(if (hasText && !captureSent) "Ask about this…" else "Ask a follow-up…") },
                         maxLines = 4,
                         shape = RoundedCornerShape(24.dp),
                         modifier = Modifier.weight(1f),

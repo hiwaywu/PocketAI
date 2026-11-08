@@ -55,7 +55,9 @@ object ScreenText {
         "[Pocket AI: this is the YouTube app, which doesn't show the video's link. If the user asks what the video " +
             "says (a summary, the transcript, details), first call fetch_url on https://www.youtube.com/results?search_query= " +
             "followed by the video's exact title from the screen (plus the channel name), then call fetch_url on the " +
-            "matching video's link to read its details and transcript.]"
+            "matching video's link to read its details and transcript. Don't ask the user for the link; find it this way. " +
+            "Only if no title is on the screen (e.g. the video is full screen), ask them to exit full screen and tap the " +
+            "Pocket AI button again.]"
 
     private val TIMESTAMP = Regex("""^(\d{1,2}:)?\d{1,2}:\d{2}$""")
     private val TIMED_LINE = Regex("""^((?:\d{1,2}:)?\d{1,2}:\d{2})\s+(.+)$""")
@@ -98,6 +100,14 @@ object ScreenText {
     fun appName(pkg: String?, label: String?, windowTitle: String?): String =
         pkg?.let { NAMES[it] } ?: label?.takeIf { it.isNotBlank() } ?: windowTitle?.takeIf { it.isNotBlank() && it.length < 40 }
             ?: pkg?.substringAfterLast('.')?.replaceFirstChar { it.uppercase() } ?: "this app"
+
+    private val ADDRESS = Regex("""^(https?://)?([a-z0-9-]+\.)+[a-z]{2,}(:\d+)?(/\S*)?$""", RegexOption.IGNORE_CASE)
+
+    /** Text shaped like a web address ("nytimes.com/2026/…", "https://…"), as a browser's address bar shows it. */
+    fun looksLikeAddress(t: String): Boolean {
+        val s = t.trim()
+        return s.length in 4..2000 && !s.contains(' ') && ADDRESS.matches(s)
+    }
 
     /**
      * An address bar's text → (full link, site). Browsers often show only the site ("nytimes.com"); then there's

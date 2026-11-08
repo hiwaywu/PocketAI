@@ -83,11 +83,14 @@ class AskService : AccessibilityService() {
             bar = runCatching { root.findAccessibilityNodeInfosByViewId(id) }.getOrNull()?.firstOrNull()?.text?.toString()
             if (bar != null) break
         }
-        val (url, site) = ScreenText.linkFromBar(bar)
         val transcript = if (pkg == ScreenText.YOUTUBE) runCatching { youTubeTranscript(root) }.getOrNull() else null
-        val pieces = mutableListOf<String>()
-        walk(root, browser, pieces, 0)
-        val screenText = ScreenText.clean(pieces)
+        val w = Walk(browser)
+        walk(root, w, false, 0)
+        // Newer Firefox draws its address bar without a fixed id: fall back to text shaped like a web address in
+        // the browser's own toolbar (not in the page).
+        if (bar.isNullOrBlank() && browser) bar = w.addressBars.firstOrNull() ?: w.addresses.firstOrNull()
+        val (url, site) = ScreenText.linkFromBar(bar)
+        val screenText = ScreenText.clean(w.pieces)
         val label = runCatching {
             packageManager.getApplicationLabel(packageManager.getApplicationInfo(pkg ?: "", 0)).toString()
         }.getOrNull()
@@ -129,8 +132,7 @@ class AskService : AccessibilityService() {
         var unchanged = 0
         for (i in 0 until 150) {
             list!!.refresh()
-            val lines = mutableListOf<String>()
-            walk(list, false, lines, 0)
+            val lines = texts(list)
             val before = segments.size
             ScreenText.transcriptSegments(lines).forEach { (t, w) -> segments.putIfAbsent("$t|$w", "$t $w") }
             unchanged = if (segments.size == before) unchanged + 1 else 0
@@ -153,8 +155,7 @@ class AskService : AccessibilityService() {
             val n = stack.removeLast()
             seen++
             if (n.isScrollable) {
-                val lines = mutableListOf<String>()
-                walk(n, false, lines, 0)
+                val lines = texts(n)
                 if (lines.count { ScreenText.isTimestamp(it) || ScreenText.transcriptSegments(listOf(it)).isNotEmpty() } >= 4) return n
             }
             for (i in 0 until n.childCount) runCatching { n.getChild(i) }.getOrNull()?.let { stack.add(it) }
@@ -176,27 +177,45 @@ class AskService : AccessibilityService() {
         return null
     }
 
+    /** What one pass over a window found. */
+    private class Walk(val browser: Boolean) {
+        val pieces = mutableListOf<String>()
+        /** Web addresses in a browser's toolbar, from an address field (id or editable) or anywhere else in it. */
+        val addressBars = mutableListOf<String>()
+        val addresses = mutableListOf<String>()
+    }
+
     /**
      * Collects the text of the window in reading order. Off-screen parts of web pages are kept (that's the rest of
-     * the article); in apps only what's showing. Password and text-entry fields are skipped.
+     * the article); in apps only what's showing. Password and text-entry fields are skipped. Apps like YouTube
+     * keep titles in the labels of tappable areas, so labels count too, except short icon labels ("Back").
      */
-    private fun walk(node: AccessibilityNodeInfo?, web: Boolean, out: MutableList<String>, depth: Int) {
-        if (node == null || depth > 80 || out.size > 4_000) return
+    private fun walk(node: AccessibilityNodeInfo?, w: Walk, inPage: Boolean, depth: Int) {
+        if (node == null || depth > 80 || w.pieces.size > 4_000) return
         if (node.isPassword) return
         val cls = node.className?.toString().orEmpty()
-        val inWeb = web || cls.contains("WebView") || cls.contains("GeckoView")
-        if (!inWeb && !node.isVisibleToUser) return
-        if (!node.isEditable) {
-            val text = node.text?.toString()
-            val desc = node.contentDescription?.toString()
-            when {
-                !text.isNullOrBlank() -> out += text
-                // Image descriptions and the like; skip icon buttons ("More options", "Back").
-                !desc.isNullOrBlank() && node.childCount == 0 && !node.isClickable -> out += desc
+        val page = inPage || cls.contains("WebView") || cls.contains("GeckoView")
+        if (!(w.browser || page) && !node.isVisibleToUser) return
+        val text = node.text?.toString()
+        val desc = node.contentDescription?.toString()
+        if (w.browser && !page) {
+            for (t in listOfNotNull(text, desc)) if (ScreenText.looksLikeAddress(t)) {
+                val id = node.viewIdResourceName.orEmpty().lowercase()
+                if (node.isEditable || listOf("url", "toolbar", "omnibar", "address", "location").any { it in id }) w.addressBars += t.trim()
+                else w.addresses += t.trim()
             }
         }
-        for (i in 0 until node.childCount) walk(runCatching { node.getChild(i) }.getOrNull(), inWeb, out, depth + 1)
+        if (!node.isEditable) {
+            when {
+                !text.isNullOrBlank() -> w.pieces += text
+                !desc.isNullOrBlank() && (com.pocketai.chat.api.PageText.weight(desc) >= 20 || (node.childCount == 0 && !node.isClickable)) ->
+                    w.pieces += desc
+            }
+        }
+        for (i in 0 until node.childCount) walk(runCatching { node.getChild(i) }.getOrNull(), w, page, depth + 1)
     }
+
+    private fun texts(node: AccessibilityNodeInfo): List<String> = Walk(false).also { walk(node, it, false, 0) }.pieces
 
     companion object {
         /** Whether the user has turned the Pocket AI button on in Accessibility settings. */

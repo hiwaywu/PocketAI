@@ -93,6 +93,12 @@ Emulator: any image works again (no native code since 2.2).
   carries `ScreenText.YOUTUBE_NOTE`, telling the AI to `fetch_url` a youtube.com/results?search_query=<title> link
   (parsed by `api/YouTubeSearch.kt` from ytInitialData) and then the video's link. Written without a device;
   verify on the Fold.
+  2.7, after the first device test (button + panel worked): the YouTube app keeps title/channel/description in
+  `contentDescription` of clickable containers, which 2.4–2.6 skipped (only 83 chars, player time) — labels with
+  `PageText.weight` ≥ 20 now count. Newer Firefox has no `mozac_browser_toolbar_url_view` id, so browsers fall back
+  to address-shaped text in the toolbar (`ScreenText.looksLikeAddress`). The button continues the last panel chat
+  for 30 min (`ui` prefs `panelChat`/`panelChatAt`, `ChatViewModel.askInPanel`), attaching each new capture once;
+  "+" starts a new chat.
 - `data/Rates.kt` — NT Media per-model usage multipliers (from its price list; its API doesn't expose
   them). `ReplyUsage.multiplier`/`billed` = tokens × multiplier, shown in chat, usage dialog/screen, model menu.
 - `data/Settings.kt` — `AppSettings` (saved API profiles, search engine/keys), stored as one AES-GCM

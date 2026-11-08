@@ -95,6 +95,7 @@ fun SettingsScreen(vm: ChatViewModel, onClose: () -> Unit) {
     var systemPrompt by remember { mutableStateOf(start.systemPrompt) }
 
     var showKey by remember { mutableStateOf(false) }
+    var showSearchKey by remember { mutableStateOf(false) }
     var status by remember { mutableStateOf<String?>(null) }
     var busy by remember { mutableStateOf(false) }
     var askSave by remember { mutableStateOf<Boolean?>(null) } // null = hidden; true = close after
@@ -289,7 +290,16 @@ fun SettingsScreen(vm: ChatViewModel, onClose: () -> Unit) {
                             )
                         },
                         singleLine = true,
-                        visualTransformation = PasswordVisualTransformation(),
+                        visualTransformation = if (showSearchKey) VisualTransformation.None else PasswordVisualTransformation(),
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                        trailingIcon = {
+                            IconButton(onClick = { showSearchKey = !showSearchKey }) {
+                                Icon(
+                                    if (showSearchKey) Icons.Outlined.VisibilityOff else Icons.Outlined.Visibility,
+                                    if (showSearchKey) "Hide key" else "Show key",
+                                )
+                            }
+                        },
                         modifier = Modifier.fillMaxWidth(),
                     )
                 }

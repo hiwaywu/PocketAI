@@ -292,7 +292,7 @@ private fun panelSuggestions(c: ScreenCapture?): List<String> {
     val where = (c.packageName.orEmpty() + " " + (c.url ?: c.site).orEmpty()).lowercase()
     return when {
         "reddit" in where -> listOf("Summarize this", "What are people saying?", "Is this true?")
-        "youtube" in where -> listOf("What's this video about?", "What do the comments say?")
+        "youtube" in where -> listOf("Summarize this video", "What do the comments say?")
         else -> listOf("Summarize this", "Explain this", "Is this reliable?")
     }
 }

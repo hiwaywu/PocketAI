@@ -88,7 +88,11 @@ Emulator: any image works again (no native code since 2.2).
   (`ChatViewModel.askAbout`, message `pageSource = "screen"`) and also handles `PROCESS_TEXT` ("Ask Pocket AI" on
   selected text, `pageSource = "selection"`). The AI is told screen text includes menus and to `fetch_url` the link
   for more. Sideloaded apps need App info → ⋮ → Allow restricted settings before the switch can be turned on.
-  Written without a device; verify on the Fold.
+  YouTube app (2.5): if "Show transcript" is on screen it's clicked, and a scrollable list with ≥4 timestamp lines is
+  scrolled through (`ACTION_SCROLL_FORWARD`, 300 ms waits) to collect the whole transcript. Otherwise the capture
+  carries `ScreenText.YOUTUBE_NOTE`, telling the AI to `fetch_url` a youtube.com/results?search_query=<title> link
+  (parsed by `api/YouTubeSearch.kt` from ytInitialData) and then the video's link. Written without a device;
+  verify on the Fold.
 - `data/Rates.kt` — NT Media per-model usage multipliers (from its price list; its API doesn't expose
   them). `ReplyUsage.multiplier`/`billed` = tokens × multiplier, shown in chat, usage dialog/screen, model menu.
 - `data/Settings.kt` — `AppSettings` (saved API profiles, search engine/keys), stored as one AES-GCM
@@ -130,6 +134,9 @@ Emulator: any image works again (no native code since 2.2).
   sentence-by-sentence translation; only the page's main content; no added facts. 2.3: the owner found 2.2's
   labelled layout ("TL;DR:", "The post:", "The vibe:", upvotes after every point) weird; now plain opening
   sentences + bullets, no paragraph labels, at most a heading like "What people are saying" / "Key moments".
+  2.5: the owner asked for summaries "how you'd do it, like you as a chatbot" — all layout rules were dropped. The
+  prompt now just says: explain it like a thoughtful friend in a chat, shape that fits, keep specifics, no
+  templates or "TL;DR:" labels, say if something couldn't be read. Don't reintroduce templates.
 - Token policy: don't waste, don't skimp. Chat text is always re-sent in full; raw web results only for the
   latest answer; photos/shared pages only for the last 4 user messages; system prompt has date only so
   provider prompt caching works. Each reply records tokens, steps, searches, pages, seconds.

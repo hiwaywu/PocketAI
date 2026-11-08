@@ -16,6 +16,8 @@ data class ScreenCapture(
     /** The site's name ("nytimes.com") when the browser only shows that. */
     val site: String? = null,
     val text: String,
+    /** A note for the AI only (e.g. how to find a YouTube video's transcript); not shown in the "what it read" preview. */
+    val note: String? = null,
 ) {
     /** Short label for the chip on the message, e.g. "Firefox screen · nytimes.com". */
     val label: String
@@ -45,6 +47,40 @@ object ScreenText {
     )
 
     val BROWSERS = URL_BAR_IDS.map { it.substringBefore(":id/") }.toSet()
+
+    const val YOUTUBE = "com.google.android.youtube"
+
+    /** Sent with a YouTube app screen when its transcript couldn't be read there. */
+    const val YOUTUBE_NOTE =
+        "[Pocket AI: this is the YouTube app, which doesn't show the video's link. If the user asks what the video " +
+            "says (a summary, the transcript, details), first call fetch_url on https://www.youtube.com/results?search_query= " +
+            "followed by the video's exact title from the screen (plus the channel name), then call fetch_url on the " +
+            "matching video's link to read its details and transcript.]"
+
+    private val TIMESTAMP = Regex("""^(\d{1,2}:)?\d{1,2}:\d{2}$""")
+    private val TIMED_LINE = Regex("""^((?:\d{1,2}:)?\d{1,2}:\d{2})\s+(.+)$""")
+
+    fun isTimestamp(s: String) = TIMESTAMP.matches(s.trim())
+
+    /**
+     * Pairs transcript lines read from the YouTube app's transcript panel: either "1:24" followed by its words,
+     * or "1:24 words" on one line. Returns time → words, in order.
+     */
+    fun transcriptSegments(lines: List<String>): List<Pair<String, String>> {
+        val out = mutableListOf<Pair<String, String>>()
+        var pending: String? = null
+        for (raw in lines) {
+            val l = raw.trim()
+            if (l.isEmpty()) continue
+            val timed = TIMED_LINE.find(l)
+            when {
+                isTimestamp(l) -> pending = l
+                timed != null -> { out += timed.groupValues[1] to timed.groupValues[2]; pending = null }
+                pending != null -> { out += pending!! to l; pending = null }
+            }
+        }
+        return out
+    }
 
     private val NAMES = mapOf(
         "org.mozilla.firefox" to "Firefox", "org.mozilla.firefox_beta" to "Firefox Beta", "org.mozilla.fenix" to "Firefox",

@@ -336,7 +336,9 @@ class ChatViewModel(private val app: Application) : AndroidViewModel(app) {
      */
     fun askAbout(capture: com.pocketai.chat.screen.ScreenCapture?, question: String): String? {
         newChat()
-        val page = capture?.takeIf { it.text.isNotBlank() }?.let { PageContext(it.label, it.url, it.text, it.kind) }
+        val page = capture?.takeIf { it.text.isNotBlank() }?.let {
+            PageContext(it.label, it.url, listOfNotNull(it.note, it.text).joinToString("\n\n"), it.kind)
+        }
         val name = capture?.appName?.let { app ->
             val q = question.trim().lineSequence().firstOrNull().orEmpty()
             "$app: " + if (q.length > 40) q.take(38).trimEnd() + "…" else q
@@ -760,21 +762,14 @@ class ChatViewModel(private val app: Application) : AndroidViewModel(app) {
             "English spelling of a name you're unsure of." +
             // Summaries used to follow the source sentence by sentence and read like a stiff translation; 2.2 adds
             // formats per kind of content (Reddit threads and videos get detailed notes with their page text).
-            "\nWhen you summarize a page, article, video or thread (a link sent on its own means \"summarize this\"), " +
-            "keep it clean and easy to read, like a sharp journalist briefing a friend in natural language (not a " +
-            "sentence-by-sentence translation, not in the source's order or officialese). Layout: first one or two " +
-            "plain sentences with the gist and why it matters; then 3-6 short bullets with the key specifics (who, " +
-            "what, when, where, numbers, money, dates, a notable quote), keeping concrete details and dropping filler; " +
-            "then, only if it adds something, one closing sentence on what's next or still unclear. No labels at the " +
-            "start of paragraphs or bullets (no 'TL;DR:', 'The gist:', 'Bottom line:', 'Why it matters:', 'The " +
-            "irony:'), no headings in a short summary (one or two short headings at most for a long source), and bold " +
-            "only a few key words. Adapt to the content: opinion or analysis: the argument and its evidence, said to " +
-            "be opinion; how-to or recipe: the steps or ingredients; product or deal: price, pros and cons; " +
-            "discussion thread: what was posted, then what people say. Scale the length to the source (a short post " +
-            "gets a few lines). Use only what the source says and don't add facts; if something important couldn't " +
-            "be read (paywall, video, missing transcript), say so in one short line at the end. This is a phone " +
-            "screen: no tables. Page text may start with a [Pocket AI: …] note on how to summarize that kind of page; " +
-            "follow it."
+            // 2.5: the owner asked for summaries "like you'd do it as a chatbot" instead of the templates of 1.12–2.4.
+            "\nWhen the user shares a link or asks for a summary (a link on its own means \"summarize this\"), explain " +
+            "it the way a thoughtful friend would in a chat: what it's about and why it matters, then the details " +
+            "worth knowing, in whatever shape fits (a couple of short paragraphs, or a few bullets when there are " +
+            "several separate points). Keep the real specifics (names, numbers, dates, quotes), skip filler, and " +
+            "match the length to the source. Write naturally: no fixed template or labels like 'TL;DR:' or 'The " +
+            "gist:'. Stick to what the source says; if part of it couldn't be read (a paywall, a video, no " +
+            "transcript), say so briefly. It's read on a phone, so no wide tables."
         if (s.webTools) {
             system += "\nYou can use the web_search and fetch_url tools. Use them whenever a question needs current " +
                 "or specific information (news, scores, prices, schedules) or the user shares a link. " +

@@ -79,6 +79,8 @@ data class ChatMessage(
     val pageTitle: String? = null,
     val pageUrl: String? = null,
     val pageText: String? = null,
+    /** Where the page came from: null = the old built-in browser, "screen" = the Pocket AI button, "selection" = selected text. */
+    val pageSource: String? = null,
     val toolEvents: List<ToolEvent> = emptyList(),
     val sources: List<Source> = emptyList(),
     /** Tool-call turns (OpenAI format) that led to this answer, replayed in later requests. */

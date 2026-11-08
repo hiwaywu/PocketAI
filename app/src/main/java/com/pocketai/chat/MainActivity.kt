@@ -39,12 +39,12 @@ class MainActivity : ComponentActivity() {
 
     override fun onStart() {
         super.onStart()
-        (application as PocketApp).visible = true
+        (application as PocketApp).visibleScreens++
         ReplyService.clearDone(this)
     }
 
     override fun onStop() {
-        (application as PocketApp).visible = false
+        (application as PocketApp).visibleScreens--
         super.onStop()
     }
 

@@ -1,3 +1,6 @@
 <resources>
     <string name="app_name">Pocket AI</string>
+    <string name="ask_service_label">Ask Pocket AI</string>
+    <string name="ask_service_summary">A Pocket AI button for every app: tap it to ask about what\'s on your screen.</string>
+    <string name="ask_service_description">Adds a Pocket AI button you can tap in any app. When you tap it, Pocket AI reads the text on that screen (and the page\'s link in browsers) so you can ask about it in a panel over the app.\n\nIt reads the screen only at the moment you tap the button, never in the background. The text is saved in a Pocket AI chat on this phone and sent only to the AI API you set up. Password fields are never read.</string>
 </resources>

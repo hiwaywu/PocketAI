@@ -355,7 +355,7 @@ private fun EmptyState(needsSetup: Boolean, onSettings: () -> Unit) {
 
 @OptIn(ExperimentalLayoutApi::class, ExperimentalFoundationApi::class)
 @Composable
-private fun UserBubble(m: ChatMessage, onImage: (String) -> Unit, onEdit: () -> Unit, modifier: Modifier) {
+internal fun UserBubble(m: ChatMessage, onImage: (String) -> Unit, onEdit: (() -> Unit)?, modifier: Modifier) {
     val clipboard = LocalClipboardManager.current
     val haptics = LocalHapticFeedback.current
     var menu by remember { mutableStateOf(false) }
@@ -398,7 +398,7 @@ private fun UserBubble(m: ChatMessage, onImage: (String) -> Unit, onEdit: () -> 
                             leadingIcon = { Icon(Icons.Outlined.ContentCopy, null) },
                             onClick = { clipboard.setText(AnnotatedString(m.text)); menu = false },
                         )
-                        DropdownMenuItem(
+                        if (onEdit != null) DropdownMenuItem(
                             text = { Text("Edit and resend") },
                             leadingIcon = { Icon(Icons.Outlined.Edit, null) },
                             onClick = { menu = false; onEdit() },
@@ -412,7 +412,7 @@ private fun UserBubble(m: ChatMessage, onImage: (String) -> Unit, onEdit: () -> 
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun AssistantMessage(
+internal fun AssistantMessage(
     m: ChatMessage,
     isLast: Boolean,
     working: Boolean,

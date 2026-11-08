@@ -14,8 +14,14 @@ class PocketApp : Application() {
     /** Reads replies aloud; created the first time it's used. */
     val speaker: Speaker by lazy { Speaker(this) }
 
-    /** True while a Pocket AI screen is visible (set by MainActivity). */
-    @Volatile var visible = false
+    /** Pocket AI screens showing right now (the main app and/or the panel over another app). */
+    @Volatile var visibleScreens = 0
+
+    /** True while a Pocket AI screen is visible, so "reply ready" notifications aren't needed. */
+    val visible: Boolean get() = visibleScreens > 0
+
+    /** What the Pocket AI button just read from another app, waiting for the panel to pick it up. */
+    @Volatile var pendingCapture: com.pocketai.chat.screen.ScreenCapture? = null
 
     override fun onCreate() {
         super.onCreate()

@@ -51,6 +51,38 @@
             </intent-filter>
         </activity>
 
+        <!-- The panel over other apps: opened by the Pocket AI button or "Ask Pocket AI" on selected text. -->
+        <activity
+            android:name=".AskActivity"
+            android:exported="true"
+            android:theme="@style/Theme.PocketAI.Panel"
+            android:taskAffinity="com.pocketai.chat.ask"
+            android:launchMode="singleTask"
+            android:excludeFromRecents="true"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|navigation|density|uiMode"
+            android:windowSoftInputMode="adjustResize">
+            <!-- "Ask Pocket AI" in the menu that appears when you select text in any app. -->
+            <intent-filter android:label="Ask Pocket AI">
+                <action android:name="android.intent.action.PROCESS_TEXT" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="text/plain" />
+            </intent-filter>
+        </activity>
+
+        <!-- The Pocket AI accessibility button (Settings → Accessibility → Installed apps → Ask Pocket AI). -->
+        <service
+            android:name=".screen.AskService"
+            android:exported="true"
+            android:label="@string/ask_service_label"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.accessibilityservice"
+                android:resource="@xml/ask_service" />
+        </service>
+
         <service
             android:name=".ReplyService"
             android:exported="false"

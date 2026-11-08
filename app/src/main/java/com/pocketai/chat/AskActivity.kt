@@ -8,6 +8,9 @@ import androidx.activity.enableEdgeToEdge
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import kotlinx.coroutines.launch
+import androidx.lifecycle.lifecycleScope
+import com.pocketai.chat.screen.SameTopic
 import com.pocketai.chat.screen.ScreenCapture
 import com.pocketai.chat.screen.ScreenText
 import com.pocketai.chat.ui.AppTheme
@@ -23,6 +26,8 @@ class AskActivity : ComponentActivity() {
     /** True once [capture] went out with a question (follow-ups in the same panel don't re-send it). */
     private var captureSent by mutableStateOf(false)
     private var chatId by mutableStateOf<String?>(null)
+    /** The recent chat that wasn't continued (different page or app), offered as "Continue last chat". */
+    private var lastChatId by mutableStateOf<String?>(null)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -35,12 +40,18 @@ class AskActivity : ComponentActivity() {
                     capture = capture,
                     captureSent = captureSent,
                     chatId = chatId,
+                    lastChatId = lastChatId,
+                    onContinueLast = {
+                        chatId = lastChatId
+                        lastChatId = null
+                    },
                     onSent = { id ->
                         chatId = id
                         captureSent = true
                         rememberPanelChat(id)
                     },
                     onNewChat = {
+                        lastChatId = chatId
                         chatId = null
                         captureSent = false
                     },
@@ -68,8 +79,8 @@ class AskActivity : ComponentActivity() {
     }
 
     private fun take(intent: Intent?) {
-        // Tapping the button again within a while continues the same conversation instead of starting over.
-        chatId = recentPanelChat()
+        chatId = null
+        lastChatId = null
         captureSent = false
         capture = if (intent?.action == Intent.ACTION_PROCESS_TEXT) {
             val text = intent.getCharSequenceExtra(Intent.EXTRA_PROCESS_TEXT)?.toString().orEmpty()
@@ -79,6 +90,23 @@ class AskActivity : ComponentActivity() {
         } else {
             app.pendingCapture.also { app.pendingCapture = null }
         }
+        decideChat()
+    }
+
+    /**
+     * Same page or app as the recent panel chat (within 30 minutes) → continue it, so the AI knows it's related;
+     * a new website, video or app → a new chat, so old pages aren't re-sent with every question.
+     */
+    private fun decideChat() {
+        val recent = recentPanelChat() ?: return
+        val at = prefs.getLong("panelChatAt", 0)
+        val shown = capture
+        lifecycleScope.launch {
+            app.chat.awaitChats()
+            if (chatId != null || captureSent || capture !== shown || app.chat.chat(recent) == null) return@launch
+            if (SameTopic.isSame(app.chat.lastScreen(recent, at), shown, System.currentTimeMillis())) chatId = recent
+            else lastChatId = recent
+        }
     }
 
     private val prefs get() = getSharedPreferences("ui", MODE_PRIVATE)
@@ -86,7 +114,7 @@ class AskActivity : ComponentActivity() {
     private fun recentPanelChat(): String? {
         val id = prefs.getString("panelChat", null) ?: return null
         val at = prefs.getLong("panelChatAt", 0)
-        return id.takeIf { System.currentTimeMillis() - at < CONTINUE_MS }
+        return id.takeIf { System.currentTimeMillis() - at < SameTopic.MAX_GAP_MS }
     }
 
     private fun rememberPanelChat(id: String) {
@@ -105,7 +133,5 @@ class AskActivity : ComponentActivity() {
 
     companion object {
         const val ACTION_ASK_SCREEN = "com.pocketai.chat.ASK_SCREEN"
-        /** How long after the last question the button keeps continuing the same chat. */
-        private const val CONTINUE_MS = 30 * 60_000L
     }
 }

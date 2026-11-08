@@ -98,7 +98,10 @@ Emulator: any image works again (no native code since 2.2).
   `PageText.weight` ≥ 20 now count. Newer Firefox has no `mozac_browser_toolbar_url_view` id, so browsers fall back
   to address-shaped text in the toolbar (`ScreenText.looksLikeAddress`). The button continues the last panel chat
   for 30 min (`ui` prefs `panelChat`/`panelChatAt`, `ChatViewModel.askInPanel`), attaching each new capture once;
-  "+" starts a new chat.
+  "+" starts a new chat. 2.8 (owner: continuing everything costs tokens; "new website → new chat"):
+  `screen/SameTopic.kt` decides on each tap — different app or >30 min → new; both page links known → same link?;
+  else ≥20% of the longer lines shared with the chat's last screen (`ChatMessage.pageApp/pageText`); too little text
+  to compare → continue. A new chat offers "↩ Continue last chat".
 - `data/Rates.kt` — NT Media per-model usage multipliers (from its price list; its API doesn't expose
   them). `ReplyUsage.multiplier`/`billed` = tokens × multiplier, shown in chat, usage dialog/screen, model menu.
 - `data/Settings.kt` — `AppSettings` (saved API profiles, search engine/keys), stored as one AES-GCM

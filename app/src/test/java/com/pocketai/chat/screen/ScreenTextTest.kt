@@ -87,4 +87,18 @@ class ScreenTextTest {
         assertTrue(ScreenText.isMoreLink("…more"))
         assertFalse(ScreenText.isMoreLink("Show transcript"))
     }
+
+    @Test fun spokenTranscriptTimes() {
+        assertEquals("1:49" to "就全林場度", ScreenText.leadingTime("1 minute, 49 seconds 就全林場度"))
+        assertEquals("0:05" to "", ScreenText.leadingTime("5 seconds"))
+        assertEquals("1:02:03" to "words", ScreenText.leadingTime("1 hour, 2 minutes, 3 seconds words"))
+        assertEquals("2:06" to "", ScreenText.leadingTime("2:06"))
+        assertNull(ScreenText.leadingTime("2:04 / 21:25"))
+        assertNull(ScreenText.leadingTime("2 hours ago"))
+        assertNull(ScreenText.leadingTime("Reply"))
+        val rows = ScreenText.transcriptSegments(
+            listOf("1 minute, 49 seconds 就全林場度一時又話", "1:49", "就全林場度一時又話", "1 minute, 56 seconds", "儀出面開佢")
+        )
+        assertEquals(listOf("1:49" to "就全林場度一時又話", "1:49" to "就全林場度一時又話", "1:56" to "儀出面開佢"), rows)
+    }
 }

@@ -2,6 +2,11 @@ package com.pocketai.chat.screen
 
 import android.accessibilityservice.AccessibilityButtonController
 import android.accessibilityservice.AccessibilityService
+import android.accessibilityservice.GestureDescription
+import android.graphics.Path
+import android.graphics.Rect
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
@@ -133,6 +138,8 @@ class AskService : AccessibilityService() {
         var list = transcriptList(root)
         if (list == null) {
             var button = findLabel(root, "show transcript")
+            // A transcript is showing but its list couldn't be found: read what's there, don't tap anything.
+            if (button == null && timeLines(root, 3).size >= 3) return null
             if (button == null) {
                 // On the video page: open the description (the title's "...more"), where "Show transcript" lives,
                 // scrolling down to it if needed.
@@ -148,7 +155,7 @@ class AskService : AccessibilityService() {
                 for (i in 0 until 8) {
                     if (button != null) break
                     val panel = descriptionList(root) ?: break
-                    if (!panel.performAction(AccessibilityNodeInfo.ACTION_SCROLL_FORWARD)) break
+                    if (!scrollDown(panel)) break
                     Thread.sleep(350)
                     root = currentRoot() ?: root
                     button = findLabel(root, "show transcript")
@@ -174,10 +181,10 @@ class AskService : AccessibilityService() {
             ScreenText.transcriptSegments(lines).forEach { (t, w) -> segments.putIfAbsent("$t|$w", "$t $w") }
             unchanged = if (segments.size == before) unchanged + 1 else 0
             if (unchanged >= 2) break
-            if (!list.performAction(AccessibilityNodeInfo.ACTION_SCROLL_FORWARD)) {
+            if (!scrollDown(list)) {
                 if (i > 0) break
             }
-            Thread.sleep(300)
+            Thread.sleep(400)
         }
         if (segments.size < 3) return null
         return com.pocketai.chat.api.Transcript.format(segments.values.toList(), 12_000)
@@ -219,21 +226,65 @@ class AskService : AccessibilityService() {
         return found
     }
 
-    /** A scrolling list on screen whose items look like transcript lines (a time, then words). */
+    /** Visible nodes whose text starts with a transcript time ("1:49", "1 minute, 49 seconds"), up to [max]. */
+    private fun timeLines(root: AccessibilityNodeInfo, max: Int): List<AccessibilityNodeInfo> {
+        val queue = ArrayDeque<AccessibilityNodeInfo>().apply { add(root) }
+        val hits = mutableListOf<AccessibilityNodeInfo>()
+        var seen = 0
+        while (queue.isNotEmpty() && seen < 8_000 && hits.size < max) {
+            val n = queue.removeFirst()
+            seen++
+            val t = (n.text ?: n.contentDescription)?.toString()
+            if (t != null && n.isVisibleToUser && ScreenText.leadingTime(t) != null) hits += n
+            for (i in 0 until n.childCount) runCatching { n.getChild(i) }.getOrNull()?.let { queue.add(it) }
+        }
+        return hits
+    }
+
+    /**
+     * The transcript's list: found from its time stamps (the list itself may not say it scrolls): the nearest
+     * scrolling container around them, else the smallest container holding several of them.
+     */
     private fun transcriptList(root: AccessibilityNodeInfo?): AccessibilityNodeInfo? {
         root ?: return null
-        val stack = ArrayDeque<AccessibilityNodeInfo>().apply { add(root) }
-        var seen = 0
-        while (stack.isNotEmpty() && seen < 3_000) {
-            val n = stack.removeLast()
-            seen++
-            if (n.isScrollable) {
-                val lines = texts(n)
-                if (lines.count { ScreenText.isTimestamp(it) || ScreenText.transcriptSegments(listOf(it)).isNotEmpty() } >= 4) return n
-            }
-            for (i in 0 until n.childCount) runCatching { n.getChild(i) }.getOrNull()?.let { stack.add(it) }
+        val hits = timeLines(root, 4)
+        if (hits.size < 3) return null
+        fun holdsTimes(n: AccessibilityNodeInfo) = texts(n).count { ScreenText.leadingTime(it) != null } >= 3
+        for (h in hits) {
+            generateSequence(h.parent) { it.parent }.firstOrNull { it.isScrollable }?.let { if (holdsTimes(it)) return it }
         }
-        return null
+        return generateSequence(hits[0].parent) { it.parent }.take(12).firstOrNull { holdsTimes(it) }
+    }
+
+    /**
+     * Scrolls a list down by most of its height: the list's own scroll action if it has one, else a finger-like
+     * swipe on it (YouTube's lists don't always take the scroll command).
+     */
+    private fun scrollDown(list: AccessibilityNodeInfo): Boolean {
+        if (list.performAction(AccessibilityNodeInfo.ACTION_SCROLL_FORWARD)) return true
+        if (list.performAction(AccessibilityNodeInfo.AccessibilityAction.ACTION_SCROLL_DOWN.id)) return true
+        return swipeUp(list)
+    }
+
+    private fun swipeUp(node: AccessibilityNodeInfo): Boolean {
+        val r = Rect()
+        node.getBoundsInScreen(r)
+        if (r.height() < 200 || r.width() < 100) return false
+        val x = r.exactCenterX()
+        val path = Path().apply {
+            moveTo(x, r.bottom - r.height() * 0.15f)
+            lineTo(x, r.top + r.height() * 0.2f)
+        }
+        val gesture = GestureDescription.Builder().addStroke(GestureDescription.StrokeDescription(path, 0, 350)).build()
+        val done = CountDownLatch(1)
+        var ok = false
+        val sent = dispatchGesture(gesture, object : GestureResultCallback() {
+            override fun onCompleted(gestureDescription: GestureDescription?) { ok = true; done.countDown() }
+            override fun onCancelled(gestureDescription: GestureDescription?) { done.countDown() }
+        }, null)
+        if (!sent) return false
+        done.await(2, TimeUnit.SECONDS)
+        return ok
     }
 
     /** A node whose text or description is [label] (ignoring case). */

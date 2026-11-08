@@ -108,6 +108,10 @@ Emulator: any image works again (no native code since 2.2).
   Transcript → "Show transcript"; Transcript panel rows = time chip + text). If that fails, the app itself searches
   YouTube with `ScreenText.titleCandidates` and matches by longest shared text (`YouTubeSearch.bestMatch`), then
   passes the exact link (`youTubeLinkNote`, also capture.url for SameTopic).
+  2.10 (device test with the transcript panel open: only the visible ~1 minute was read, 542 chars): the list is
+  found from its time stamps (`ScreenText.leadingTime` also parses "1 minute, 49 seconds"; skips "2:04 / 21:25" and
+  "… ago") via the nearest scrollable ancestor, and scrolled with SCROLL_FORWARD → SCROLL_DOWN → a
+  `dispatchGesture` swipe (`canPerformGestures` in ask_service.xml). Never taps "...more" while time lines show.
 - `data/Rates.kt` — NT Media per-model usage multipliers (from its price list; its API doesn't expose
   them). `ReplyUsage.multiplier`/`billed` = tokens × multiplier, shown in chat, usage dialog/screen, model menu.
 - `data/Settings.kt` — `AppSettings` (saved API profiles, search engine/keys), stored as one AES-GCM

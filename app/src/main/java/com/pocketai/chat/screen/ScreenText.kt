@@ -93,9 +93,40 @@ object ScreenText {
 
     fun isTimestamp(s: String) = TIMESTAMP.matches(s.trim())
 
+    private val DURATION = Regex(
+        """^(?:(\d+)\s*hours?)?[,\s]*(?:(\d+)\s*minutes?)?[,\s]*(?:(\d+)\s*seconds?)?(?=$|[\s,])""",
+        RegexOption.IGNORE_CASE,
+    )
+
     /**
-     * Pairs transcript lines read from the YouTube app's transcript panel: either "1:24" followed by its words,
-     * or "1:24 words" on one line. Returns time → words, in order.
+     * A transcript time at the start of [s] → (time as "m:ss", the words after it). Understands "1:49", "1:02:03"
+     * and the spoken form screen readers get ("1 minute, 49 seconds"). Not the player's "2:04 / 21:25" or
+     * "2 hours ago".
+     */
+    fun leadingTime(s: String): Pair<String, String>? {
+        val t = s.trim()
+        if (t.isEmpty()) return null
+        val (time, rest) = when {
+            isTimestamp(t) -> t to ""
+            TIMED_LINE.find(t) != null -> TIMED_LINE.find(t)!!.let { it.groupValues[1] to it.groupValues[2].trim() }
+            else -> {
+                val m = DURATION.find(t) ?: return null
+                val (h, mi, se) = m.destructured
+                if (h.isEmpty() && mi.isEmpty() && se.isEmpty()) return null
+                val hh = h.toIntOrNull() ?: 0
+                val mm = mi.toIntOrNull() ?: 0
+                val ss = se.toIntOrNull() ?: 0
+                val clock = if (hh > 0) "%d:%02d:%02d".format(hh, mm, ss) else "%d:%02d".format(mm, ss)
+                clock to t.substring(m.range.last + 1).trim().trimStart(',', ' ')
+            }
+        }
+        if (rest.startsWith("/") || rest.startsWith("ago", ignoreCase = true)) return null
+        return time to rest
+    }
+
+    /**
+     * Pairs transcript lines read from the YouTube app's transcript panel: a time followed by its words, or both
+     * on one line. Returns (time, words), in order.
      */
     fun transcriptSegments(lines: List<String>): List<Pair<String, String>> {
         val out = mutableListOf<Pair<String, String>>()
@@ -103,10 +134,10 @@ object ScreenText {
         for (raw in lines) {
             val l = raw.trim()
             if (l.isEmpty()) continue
-            val timed = TIMED_LINE.find(l)
+            val lt = leadingTime(l)
             when {
-                isTimestamp(l) -> pending = l
-                timed != null -> { out += timed.groupValues[1] to timed.groupValues[2]; pending = null }
+                lt != null && lt.second.isEmpty() -> pending = lt.first
+                lt != null -> { out += lt; pending = null }
                 pending != null -> { out += pending!! to l; pending = null }
             }
         }

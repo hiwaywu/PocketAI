@@ -727,18 +727,21 @@ class ChatViewModel(private val app: Application) : AndroidViewModel(app) {
             "English spelling of a name you're unsure of." +
             // Summaries used to follow the source sentence by sentence and read like a stiff translation; 2.2 adds
             // formats per kind of content (Reddit threads and videos get detailed notes with their page text).
-            "\nWhen you summarize a page, article, video or thread (a link sent on its own means \"summarize this\"): " +
-            "write the way a sharp journalist briefs a friend, in natural language, not a sentence-by-sentence " +
-            "translation and not in the source's order or officialese. Open with a bold one- or two-sentence TL;DR " +
-            "of what happened or what it says and why it matters. Then the key details as short bullets: who, what, " +
-            "when, where, numbers, money, dates and notable quotes, keeping every concrete specific and dropping " +
-            "filler. Fit the shape to the content: news: what's next or still unclear; opinion or analysis: the " +
-            "argument and its evidence, labelled as opinion; how-to or recipe: the steps or ingredients; product or " +
-            "deal: what it is, price, pros and cons; discussion thread: what was posted, then what people say and " +
-            "the overall mood. Scale the length to the source (a short post gets a few lines). Use only what the " +
-            "source says and don't add facts; if something important couldn't be read (paywall, video, missing " +
-            "transcript), say so in one short line. This is a phone screen: short paragraphs and bullet lists, no " +
-            "wide tables. Page text may start with a [Pocket AI: …] note on how to summarize that kind of page; follow it."
+            "\nWhen you summarize a page, article, video or thread (a link sent on its own means \"summarize this\"), " +
+            "keep it clean and easy to read, like a sharp journalist briefing a friend in natural language (not a " +
+            "sentence-by-sentence translation, not in the source's order or officialese). Layout: first one or two " +
+            "plain sentences with the gist and why it matters; then 3-6 short bullets with the key specifics (who, " +
+            "what, when, where, numbers, money, dates, a notable quote), keeping concrete details and dropping filler; " +
+            "then, only if it adds something, one closing sentence on what's next or still unclear. No labels at the " +
+            "start of paragraphs or bullets (no 'TL;DR:', 'The gist:', 'Bottom line:', 'Why it matters:', 'The " +
+            "irony:'), no headings in a short summary (one or two short headings at most for a long source), and bold " +
+            "only a few key words. Adapt to the content: opinion or analysis: the argument and its evidence, said to " +
+            "be opinion; how-to or recipe: the steps or ingredients; product or deal: price, pros and cons; " +
+            "discussion thread: what was posted, then what people say. Scale the length to the source (a short post " +
+            "gets a few lines). Use only what the source says and don't add facts; if something important couldn't " +
+            "be read (paywall, video, missing transcript), say so in one short line at the end. This is a phone " +
+            "screen: no tables. Page text may start with a [Pocket AI: …] note on how to summarize that kind of page; " +
+            "follow it."
         if (s.webTools) {
             system += "\nYou can use the web_search and fetch_url tools. Use them whenever a question needs current " +
                 "or specific information (news, scores, prices, schedules) or the user shares a link. " +

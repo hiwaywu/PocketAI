@@ -402,19 +402,19 @@ return JSON.stringify({s:ready?'nobutton':'loading'});
             if (!transcript.isNullOrBlank()) append("Transcript ([m:ss] = time in the video):\n$transcript")
             else append(
                 "(No transcript could be read for this video. Summarize from the title, description and chapters, and " +
-                    "say in one short line that the transcript wasn't available, so details of what's said may be missing.)"
+                    "say in one short line at the end that the transcript wasn't available.)"
             )
         }
         return FetchedPage(info.title, original, text)
     }
 
     private fun youtubeGuide(id: String) =
-        "[Pocket AI: this is a YouTube video. Summarize what the video actually says, not just its topic: a bold " +
-            "one- or two-sentence TL;DR of its main claim, story or answer; then the main points as bullets with the " +
-            "concrete facts, names, numbers, steps or arguments; then, if there's a transcript or a chapter list, " +
-            "'Key moments' as a bullet list (not a table) where each time is a link to that moment, written like " +
-            "[4:05](https://youtu.be/$id?t=245) (t = minutes × 60 + seconds); end with the creator's conclusion or " +
-            "the takeaway.]"
+        "[Pocket AI: this is a YouTube video. Summarize what it actually says, not just its topic, cleanly and with " +
+            "no labels at the start of paragraphs (no 'TL;DR:'): one or two sentences with its main claim, story or " +
+            "answer; then 3-6 bullets with the concrete points (facts, names, numbers, steps or arguments); then, if " +
+            "there's a transcript or a chapter list, the heading 'Key moments' and 3-6 bullets (not a table), each " +
+            "starting with the time as a link to that moment, written like [4:05](https://youtu.be/$id?t=245) " +
+            "(t = minutes × 60 + seconds); end with the creator's conclusion in one sentence, if there is one.]"
 
     private class VideoInfo(
         val title: String, val channel: String, val seconds: Long, val description: String,

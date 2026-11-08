@@ -98,7 +98,9 @@ import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -541,6 +543,9 @@ private fun ToolEventRow(e: ToolEvent) {
 @Composable
 private fun Composer(state: UiState, vm: ChatViewModel) {
     val context = LocalContext.current
+    // After sending, the keyboard goes down so the reply has the whole screen.
+    val keyboard = LocalSoftwareKeyboardController.current
+    val focus = LocalFocusManager.current
     var text by rememberSaveable { mutableStateOf("") }
     var cameraPath by rememberSaveable { mutableStateOf<String?>(null) }
 
@@ -633,7 +638,13 @@ private fun Composer(state: UiState, vm: ChatViewModel) {
                         modifier = Modifier.padding(bottom = 4.dp),
                     ) { Icon(Icons.Filled.Mic, "Voice typing") }
                     else -> FilledIconButton(
-                        onClick = { if (vm.send(text)) text = "" },
+                        onClick = {
+                            if (vm.send(text)) {
+                                text = ""
+                                keyboard?.hide()
+                                focus.clearFocus()
+                            }
+                        },
                         modifier = Modifier.padding(bottom = 4.dp),
                     ) {
                         Icon(Icons.AutoMirrored.Filled.Send, "Send")

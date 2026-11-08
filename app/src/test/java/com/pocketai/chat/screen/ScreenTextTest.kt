@@ -56,4 +56,11 @@ class ScreenTextTest {
         assertEquals("Text from Reddit", ScreenCapture("selection", "Reddit", text = "x").label)
         assertNull(ScreenCapture("screen", "Reddit", text = "x").url)
     }
+
+    @Test fun youTubeTranscriptPanel() {
+        val segs = ScreenText.transcriptSegments(listOf("Transcript", "0:00", "Hello everyone", "0:04", "Today we talk about TVB", "1:02:03 a long video line", "Search transcript"))
+        assertEquals(listOf("0:00" to "Hello everyone", "0:04" to "Today we talk about TVB", "1:02:03" to "a long video line"), segs)
+        assertTrue(ScreenText.isTimestamp("11:35"))
+        assertFalse(ScreenText.isTimestamp("2.1k views"))
+    }
 }

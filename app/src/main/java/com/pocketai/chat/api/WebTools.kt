@@ -268,6 +268,7 @@ return JSON.stringify({s:ready?'nobutton':'loading'});
      */
     suspend fun fetch(url: String, deepSeekKey: String? = null, onStatus: (String) -> Unit = {}): FetchedPage {
         youtubeId(url)?.let { id -> return youtube(id, url, onStatus) }
+        YouTubeSearch.query(url)?.let { q -> return youtubeSearch(q) }
         if (Reddit.isReddit(url)) attempt { reddit(url, deepSeekKey, onStatus) }?.let { return it }
         return article(url, deepSeekKey)
     }
@@ -409,12 +410,9 @@ return JSON.stringify({s:ready?'nobutton':'loading'});
     }
 
     private fun youtubeGuide(id: String) =
-        "[Pocket AI: this is a YouTube video. Summarize what it actually says, not just its topic, cleanly and with " +
-            "no labels at the start of paragraphs (no 'TL;DR:'): one or two sentences with its main claim, story or " +
-            "answer; then 3-6 bullets with the concrete points (facts, names, numbers, steps or arguments); then, if " +
-            "there's a transcript or a chapter list, the heading 'Key moments' and 3-6 bullets (not a table), each " +
-            "starting with the time as a link to that moment, written like [4:05](https://youtu.be/$id?t=245) " +
-            "(t = minutes × 60 + seconds); end with the creator's conclusion in one sentence, if there is one.]"
+        "[Pocket AI: this is a YouTube video's details and, when available, its transcript. Summarize what the video " +
+            "actually says, not just its topic. When you mention a moment in it, link the time to that spot, like " +
+            "[4:05](https://youtu.be/$id?t=245).]"
 
     private class VideoInfo(
         val title: String, val channel: String, val seconds: Long, val description: String,
@@ -433,7 +431,7 @@ return JSON.stringify({s:ready?'nobutton':'loading'});
             if (!r.isSuccessful) throw IOException("YouTube returned HTTP ${r.code}")
             r.body?.string().orEmpty()
         }
-        val player = extractJsonObject(html, "ytInitialPlayerResponse")
+        val player = YouTubeSearch.jsonAfter(html, "ytInitialPlayerResponse")
             ?.let { runCatching { json.parseToJsonElement(it).jsonObject }.getOrNull() }
             ?: throw IOException("Couldn't read this YouTube page.")
         val details = player["videoDetails"] as? JsonObject
@@ -548,30 +546,19 @@ return JSON.stringify({s:ready?'nobutton':'loading'});
         return out
     }
 
-    /** Finds `marker = {...}` in a page and returns the balanced JSON object text. */
-    private fun extractJsonObject(html: String, marker: String): String? {
-        var i = html.indexOf(marker)
-        if (i < 0) return null
-        i = html.indexOf('{', i)
-        if (i < 0) return null
-        var depth = 0
-        var inString = false
-        var escape = false
-        for (j in i until html.length) {
-            val c = html[j]
-            if (inString) {
-                when {
-                    escape -> escape = false
-                    c == '\\' -> escape = true
-                    c == '"' -> inString = false
-                }
-            } else when (c) {
-                '"' -> inString = true
-                '{' -> depth++
-                '}' -> { depth--; if (depth == 0) return html.substring(i, j + 1) }
-            }
+    /** YouTube's own search page, as a list of videos with links (used to find a video seen in the YouTube app). */
+    private suspend fun youtubeSearch(q: String): FetchedPage = withContext(Dispatchers.IO) {
+        val html = http.newCall(
+            Request.Builder().url(YouTubeSearch.searchUrl(q))
+                .header("User-Agent", DESKTOP_UA)
+                .header("Accept-Language", "en-US,en;q=0.9")
+                .header("Cookie", "CONSENT=YES+1; SOCS=CAI")
+                .build()
+        ).execute().use { r ->
+            if (!r.isSuccessful) throw IOException("YouTube search returned HTTP ${r.code}")
+            r.body?.string().orEmpty()
         }
-        return null
+        FetchedPage("YouTube search: $q", YouTubeSearch.searchUrl(q), YouTubeSearch.format(q, YouTubeSearch.parse(html)))
     }
 
     private fun cleanText(s: String): String = PageText.clean(s, MAX_PAGE_CHARS)

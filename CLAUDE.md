@@ -137,6 +137,10 @@ Emulator: any image works again (no native code since 2.2).
   2.5: the owner asked for summaries "how you'd do it, like you as a chatbot" — all layout rules were dropped. The
   prompt now just says: explain it like a thoughtful friend in a chat, shape that fits, keep specifics, no
   templates or "TL;DR:" labels, say if something couldn't be read. Don't reintroduce templates.
+- 2.6: the owner asked that the AI "follow other instructions similar to you" (Claude). `DEFAULT_SYSTEM_PROMPT` and the
+  added language/summary/web rules were rewritten in that plain style: answer first, length matches the question,
+  prose over formatting, honest about uncertainty, opinions when asked, no filler or closing offers. Still no
+  assistant name. Saved copies of older defaults are upgraded on load (`OLD_DEFAULT_PROMPTS`); edited ones aren't.
 - Token policy: don't waste, don't skimp. Chat text is always re-sent in full; raw web results only for the
   latest answer; photos/shared pages only for the last 4 user messages; system prompt has date only so
   provider prompt caching works. Each reply records tokens, steps, searches, pages, seconds.

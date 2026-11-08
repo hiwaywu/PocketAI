@@ -753,16 +753,13 @@ class ChatViewModel(private val app: Application) : AndroidViewModel(app) {
         val today = SimpleDateFormat("EEEE, MMMM d, yyyy", Locale.US).format(Date())
         val zone = java.util.TimeZone.getDefault().id
         var system = s.systemPrompt.trim() + "\n\nToday's date is $today (the user's time zone is $zone)."
-        // Without this, sources in another language (e.g. a Cantonese video) leaked untranslated quotes,
-        // or the whole reply switched language.
-        system += "\nAlways reply in the language of the user's own typed words (even a one-word request like " +
-            "'Summary' or 'Explain' means English), never the language of a shared page, video or search result. " +
-            "Don't quote foreign-language text on its own: translate it. If the original wording matters (a name, " +
-            "title or key quote), give the translation first and the original after it in brackets; never guess the " +
-            "English spelling of a name you're unsure of." +
-            // Summaries used to follow the source sentence by sentence and read like a stiff translation; 2.2 adds
-            // formats per kind of content (Reddit threads and videos get detailed notes with their page text).
-            // 2.5: the owner asked for summaries "like you'd do it as a chatbot" instead of the templates of 1.12–2.4.
+        // Language: without the explicit "one-word request" wording, a Chinese article + "Summary" got a Chinese
+        // reply 2 of 2 times, and foreign quotes leaked untranslated. Summaries: 2.5 dropped all templates at the
+        // owner's request ("like you'd do it as a chatbot"). 2.6 rewrote the rest in the same plain style.
+        system += "\nReply in the language the user writes in (even a one-word request like 'Summary' or 'Explain' " +
+            "means English), not the language of a shared page, video or search result. Translate foreign-language " +
+            "text rather than quoting it; when the original wording matters (a name, a title, a key quote), give the " +
+            "translation with the original in brackets, and don't guess the English spelling of a name you're unsure of." +
             "\nWhen the user shares a link or asks for a summary (a link on its own means \"summarize this\"), explain " +
             "it the way a thoughtful friend would in a chat: what it's about and why it matters, then the details " +
             "worth knowing, in whatever shape fits (a couple of short paragraphs, or a few bullets when there are " +
@@ -771,24 +768,19 @@ class ChatViewModel(private val app: Application) : AndroidViewModel(app) {
             "gist:'. Stick to what the source says; if part of it couldn't be read (a paywall, a video, no " +
             "transcript), say so briefly. It's read on a phone, so no wide tables."
         if (s.webTools) {
-            system += "\nYou can use the web_search and fetch_url tools. Use them whenever a question needs current " +
-                "or specific information (news, scores, prices, schedules) or the user shares a link. " +
-                "Be quick and efficient, like a person who knows where to look: turn relative dates ('last night', " +
-                "'yesterday', 'this weekend') into exact dates using today's date; do ONE precise search first; answer " +
-                "from the search summaries when they are enough; open at most 1-3 pages, preferring official or major " +
-                "sites (e.g. ESPN, NBA.com, AP, Reuters); never repeat near-identical searches. " +
-                "When you use information from the web, cite the sources as Markdown links. Don't announce what you're " +
-                "about to do (\"I'll open that page\"); just call the tool, then answer. " +
-                // Without this, models answer "latest/last" questions from their (old) training or from an old
-                // shared article, or search for the answer they already believe (e.g. a 2025 fight in 2026).
-                "Your own knowledge stops well before today, so for anything that changes over time (latest, last, " +
-                "next or current results, events, records, titles, prices, versions, who holds a role) assume newer " +
-                "events may exist that you don't know about. Search with an open query that doesn't presuppose the " +
-                "answer, adding the current month and year (e.g. 'Islam Makhachev last fight November 2026', not the " +
-                "fight you remember). Check the dates on the results and go with the newest; if they disagree with " +
-                "your memory, trust the newest dated results. One open search is usually enough: search again only " +
-                "if the results point to something newer. Pages the user shares are snapshots from when they were " +
-                "written and may be outdated too."
+            // Freshness (1.9, tested 4/4): models answered "latest/last" questions from old training or an old
+            // article, or searched for the answer they already believed. Keep the open, dated query and the example.
+            system += "\nYou can search the web (web_search) and read pages (fetch_url). Use them when a question " +
+                "needs current or specific information (news, scores, prices, schedules) or the user shares a link. " +
+                "Work like someone who knows where to look: turn relative dates ('last night', 'this weekend') into " +
+                "real dates, start with one precise search, answer from the result summaries when they're enough, and " +
+                "read at most a few pages, preferring official or major sources. Don't repeat near-identical searches. " +
+                "Your own knowledge stops well before today, so for anything that changes over time (the latest, last " +
+                "or next result or event, records, prices, versions, who holds a role) assume there may be newer news: " +
+                "search with an open query that adds the current month and year instead of the answer you remember " +
+                "(e.g. 'Islam Makhachev last fight November 2026', not the fight you remember), and when the results' " +
+                "dates disagree with your memory, trust the newest. Pages the user shares are snapshots and may be out " +
+                "of date too. Cite what you use as Markdown links. Just call the tools; don't announce them first."
         }
         out += buildJsonObject { put("role", "system"); put("content", system) }
         textChars += system.length

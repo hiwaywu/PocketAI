@@ -4,9 +4,12 @@ import android.annotation.SuppressLint
 import android.content.Context
 import android.os.Handler
 import android.os.Looper
+import android.webkit.CookieManager
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import com.pocketai.chat.BuildConfig
 import com.pocketai.chat.data.SearchEngine
+import com.pocketai.chat.data.hostOf
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
@@ -47,8 +50,37 @@ class WebTools(private val http: OkHttpClient, private val appContext: Context) 
     companion object {
         const val UA =
             "Mozilla/5.0 (Linux; Android 16; SM-F966U) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Mobile Safari/537.36"
+        /** Desktop Chrome, for YouTube's full watch page (its transcript panel lives there). */
+        const val DESKTOP_UA =
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36"
+        /** Reddit asks API users to name their app; the browser UA is only tried if this one is refused. */
+        private val REDDIT_UA = "android:com.pocketai.chat:${BuildConfig.VERSION_NAME} (Pocket AI)"
         private const val MAX_PAGE_CHARS = 15_000
         private const val MAX_DOWNLOAD = 3_000_000L
+        /** About 12k tokens of transcript: a 20-minute talk fits whole; longer videos are sampled evenly. */
+        private const val TRANSCRIPT_TOKENS = 12_000
+
+        /**
+         * Run repeatedly in the hidden YouTube page: returns the transcript once the panel shows it;
+         * otherwise taps "Show transcript" (opening the description first if needed). Videos stay paused.
+         */
+        private const val TRANSCRIPT_JS = """(function(){try{
+document.querySelectorAll('video').forEach(function(v){try{v.muted=true;v.pause();}catch(e){}});
+var segs=document.querySelectorAll('ytd-transcript-segment-renderer,ytm-transcript-segment-renderer,transcript-segment-view-model');
+if(segs.length>2){var out=[];segs.forEach(function(s){out.push((s.innerText||s.textContent||'').replace(/\s+/g,' ').trim());});
+return JSON.stringify({s:'done',lines:out});}
+var panel=document.querySelector('[target-id="engagement-panel-searchable-transcript"] #segments-container,ytd-transcript-renderer,ytm-transcript-renderer');
+if(panel&&/\d:\d\d/.test(panel.innerText||''))return JSON.stringify({s:'done',text:panel.innerText});
+var btn=document.querySelector('ytd-video-description-transcript-section-renderer button,ytm-video-description-transcript-section-renderer button');
+if(!btn){var c=document.querySelectorAll('button,[role="button"],tp-yt-paper-item');
+for(var i=0;i<c.length;i++){var t=((c[i].getAttribute('aria-label')||'')+' '+(c[i].innerText||'')).toLowerCase();
+if(t.indexOf('show transcript')>=0){btn=c[i];break;}}}
+if(btn){if(!window.__paT||Date.now()-window.__paT>4000){window.__paT=Date.now();btn.click();}return JSON.stringify({s:'clicked'});}
+var more=document.querySelector('#description-inline-expander #expand,ytd-text-inline-expander #expand');
+if(more&&!window.__paM){window.__paM=1;more.click();return JSON.stringify({s:'expanded'});}
+var ready=!!document.querySelector('ytd-watch-metadata #title,ytd-watch-flexy #description');
+return JSON.stringify({s:ready?'nobutton':'loading'});
+}catch(e){return JSON.stringify({s:'error',e:String(e)});}})()"""
 
         val TOOL_DEFS: JsonArray = buildJsonArray {
             addJsonObject {
@@ -80,7 +112,9 @@ class WebTools(private val http: OkHttpClient, private val appContext: Context) 
                     put("name", "fetch_url")
                     put(
                         "description",
-                        "Open a web page and return its readable text. Use it on links the user shares and on search results you want to read."
+                        "Open a web page and return its readable text. Use it on links the user shares and on search results " +
+                            "you want to read. Reddit links return the post, the page it links to and the top-voted comments; " +
+                            "YouTube links return the video's details and its transcript when available."
                     )
                     putJsonObject("parameters") {
                         put("type", "object")
@@ -227,24 +261,47 @@ class WebTools(private val http: OkHttpClient, private val appContext: Context) 
     }
 
     /**
-     * Downloads a page and extracts its text. Pages built by JavaScript (live scoreboards, many
-     * news sites) come back nearly empty that way, so those are re-opened in a hidden browser.
+     * Reads a page for the AI. Reddit threads and YouTube videos get their own readers; other pages are
+     * downloaded and cut down to the article. Pages built by JavaScript (live scoreboards, some news
+     * sites) come back nearly empty that way, so those go to DeepSeek's reader or a hidden WebView.
+     * [onStatus] reports slow steps ("Reading the comments…").
      */
-    suspend fun fetch(url: String, deepSeekKey: String? = null): FetchedPage {
-        youtubeId(url)?.let { id -> return withContext(Dispatchers.IO) { youtube(id, url) } }
-        if (!deepSeekKey.isNullOrBlank()) {
-            runCatching { withContext(Dispatchers.IO) { deepSeekFetch(url, deepSeekKey) } }
-                .getOrNull()?.takeIf { it.text.length >= 200 }?.let { return it }
-        }
-        val fast = runCatching { withContext(Dispatchers.IO) { download(url) } }
-        val page = fast.getOrNull()
-        if (page != null && page.text.length >= 500) return page
-        val rendered = render(url)
-        if (rendered != null && rendered.text.length > (page?.text?.length ?: 0)) return rendered
-        return page ?: throw (fast.exceptionOrNull() ?: IOException("Could not read $url"))
+    suspend fun fetch(url: String, deepSeekKey: String? = null, onStatus: (String) -> Unit = {}): FetchedPage {
+        youtubeId(url)?.let { id -> return youtube(id, url, onStatus) }
+        if (Reddit.isReddit(url)) attempt { reddit(url, deepSeekKey, onStatus) }?.let { return it }
+        return article(url, deepSeekKey)
     }
 
-    private fun download(url: String): FetchedPage {
+    /** Like runCatching, but pressing Stop (cancellation) still stops the reply. */
+    private inline fun <T> attempt(block: () -> T?): T? = try {
+        block()
+    } catch (e: kotlinx.coroutines.CancellationException) {
+        throw e
+    } catch (_: Exception) {
+        null
+    }
+
+    private suspend fun article(url: String, deepSeekKey: String?): FetchedPage {
+        val fast = runCatching { withContext(Dispatchers.IO) { download(url) } }
+        val page = fast.getOrNull()
+        if (page != null && (page.isArticle || PageText.weight(page.text) >= 1_500)) return page.toPage()
+        var best: FetchedPage? = page?.toPage()
+        fun weight(p: FetchedPage?) = p?.let { PageText.weight(it.text) } ?: 0
+        if (!deepSeekKey.isNullOrBlank()) {
+            runCatching { withContext(Dispatchers.IO) { deepSeekFetch(url, deepSeekKey) } }.getOrNull()
+                ?.takeIf { weight(it) >= 200 && weight(it) > weight(best) }
+                ?.let { if (weight(it) >= PageText.MIN_ARTICLE) return it else best = it }
+        }
+        val rendered = render(url)
+        if (rendered != null && weight(rendered) > weight(best)) return rendered
+        return best ?: throw (fast.exceptionOrNull() ?: IOException("Could not read $url"))
+    }
+
+    private class Downloaded(val title: String, val url: String, val text: String, val isArticle: Boolean) {
+        fun toPage() = FetchedPage(title, url, text)
+    }
+
+    private fun download(url: String): Downloaded {
         val req = Request.Builder().url(url)
             .header("User-Agent", UA)
             .header("Accept", "text/html,application/xhtml+xml,text/plain;q=0.9,*/*;q=0.8")
@@ -263,8 +320,56 @@ class WebTools(private val http: OkHttpClient, private val appContext: Context) 
             val charset = body.contentType()?.charset() ?: Charsets.UTF_8
             val raw = String(bytes, charset)
             val finalUrl = r.request.url.toString()
-            if (!ct.contains("html") && ct.isNotEmpty()) return FetchedPage(finalUrl, finalUrl, raw.take(MAX_PAGE_CHARS))
-            return FetchedPage(titleOf(raw, finalUrl), finalUrl, htmlToText(raw, finalUrl))
+            if (!ct.contains("html") && ct.isNotEmpty()) return Downloaded(finalUrl, finalUrl, raw.take(MAX_PAGE_CHARS), false)
+            val res = PageText.extract(raw, finalUrl, MAX_PAGE_CHARS)
+            return Downloaded(res.title, finalUrl, res.text, res.isArticle)
+        }
+    }
+
+    // ------------------------------------------------------------------ Reddit
+
+    /** A Reddit thread: the post, what it links to, and the top-voted comments. Null if it couldn't be read. */
+    private suspend fun reddit(url: String, deepSeekKey: String?, onStatus: (String) -> Unit): FetchedPage? {
+        onStatus("Reading the Reddit thread…")
+        val thread = withContext(Dispatchers.IO) {
+            val link = if (Reddit.isShortLink(url)) resolveRedirect(url) else url
+            val jsonUrl = Reddit.jsonUrl(link) ?: return@withContext null
+            val fromJson = listOf(REDDIT_UA, UA).firstNotNullOfOrNull { ua ->
+                runCatching { getText(jsonUrl, ua, "application/json") }.getOrNull()?.let { Reddit.parse(it) }
+            }
+            val t = fromJson ?: runCatching { getText(link, UA, "text/html") }.getOrNull()?.let { Reddit.parseHtml(it, link) }
+            t?.copy(singleCommentThread = jsonUrl.contains("context=")) to link
+        } ?: return null
+        val (t, link) = thread
+        if (t == null) return null
+        val linked = t.post.linkUrl?.takeIf { Reddit.isReadableLink(it) }?.let { target ->
+            onStatus("Reading the linked page: ${hostOf(target)}")
+            attempt { fetch(target, deepSeekKey) }
+        }
+        val title = t.post.title + if (t.post.subreddit.isNotBlank()) " : ${t.post.subreddit}" else ""
+        return FetchedPage(title, link, Reddit.format(t, System.currentTimeMillis(), linked))
+    }
+
+    /** Follows a short link's redirects without downloading the page. */
+    private fun resolveRedirect(url: String): String {
+        var current = url
+        val noFollow = http.newBuilder().followRedirects(false).followSslRedirects(false).build()
+        repeat(5) {
+            val req = Request.Builder().url(current).header("User-Agent", UA).build()
+            val next = noFollow.newCall(req).execute().use { r ->
+                if (r.code in 300..399) r.header("Location")?.let { loc -> r.request.url.resolve(loc)?.toString() } else null
+            } ?: return current
+            current = next
+        }
+        return current
+    }
+
+    private fun getText(url: String, ua: String, accept: String): String {
+        val req = Request.Builder().url(url).header("User-Agent", ua).header("Accept", accept)
+            .header("Accept-Language", "en-US,en;q=0.9").build()
+        http.newCall(req).execute().use { r ->
+            if (!r.isSuccessful) throw IOException("HTTP ${r.code} from $url")
+            return r.body?.string().orEmpty()
         }
     }
 
@@ -278,12 +383,49 @@ class WebTools(private val http: OkHttpClient, private val appContext: Context) 
         return m?.groupValues?.get(1)
     }
 
-    /** Reads a video's title, description and caption transcript (best effort). */
-    private fun youtube(id: String, original: String): FetchedPage {
+    /** A video's title, channel, date, description and, when YouTube shows one, its transcript. */
+    private suspend fun youtube(id: String, original: String, onStatus: (String) -> Unit): FetchedPage {
+        val info = withContext(Dispatchers.IO) { youtubeInfo(id) }
+        var transcript = info.captionsUrl?.let { u -> withContext(Dispatchers.IO) { runCatching { captions(u) }.getOrNull() } }
+        if (transcript == null) {
+            onStatus("Opening the video's transcript…")
+            transcript = transcriptFromPage(id)?.let { Transcript.format(it, TRANSCRIPT_TOKENS) }
+        }
+        val text = buildString {
+            append(youtubeGuide(id)).append("\n\n")
+            append("YouTube video: ${info.title}\n")
+            if (info.channel.isNotEmpty()) append("Channel: ${info.channel}\n")
+            if (info.seconds > 0) append("Length: ${info.seconds / 60} min ${info.seconds % 60} s\n")
+            info.published?.let { append("Published: $it\n") }
+            info.views?.let { append("Views: ${"%,d".format(it)}\n") }
+            append("\nDescription:\n${info.description.take(3000)}\n\n")
+            if (!transcript.isNullOrBlank()) append("Transcript ([m:ss] = time in the video):\n$transcript")
+            else append(
+                "(No transcript could be read for this video. Summarize from the title, description and chapters, and " +
+                    "say in one short line that the transcript wasn't available, so details of what's said may be missing.)"
+            )
+        }
+        return FetchedPage(info.title, original, text)
+    }
+
+    private fun youtubeGuide(id: String) =
+        "[Pocket AI: this is a YouTube video. Summarize what the video actually says, not just its topic: a bold " +
+            "one- or two-sentence TL;DR of its main claim, story or answer; then the main points as bullets with the " +
+            "concrete facts, names, numbers, steps or arguments; then, if there's a transcript or a chapter list, " +
+            "'Key moments' as a bullet list (not a table) where each time is a link to that moment, written like " +
+            "[4:05](https://youtu.be/$id?t=245) (t = minutes × 60 + seconds); end with the creator's conclusion or " +
+            "the takeaway.]"
+
+    private class VideoInfo(
+        val title: String, val channel: String, val seconds: Long, val description: String,
+        val published: String?, val views: Long?, val captionsUrl: String?,
+    )
+
+    private fun youtubeInfo(id: String): VideoInfo {
         val watch = "https://www.youtube.com/watch?v=$id&hl=en"
         val html = http.newCall(
             Request.Builder().url(watch)
-                .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36")
+                .header("User-Agent", DESKTOP_UA)
                 .header("Accept-Language", "en-US,en;q=0.9")
                 .header("Cookie", "CONSENT=YES+1; SOCS=CAI")
                 .build()
@@ -295,11 +437,7 @@ class WebTools(private val http: OkHttpClient, private val appContext: Context) 
             ?.let { runCatching { json.parseToJsonElement(it).jsonObject }.getOrNull() }
             ?: throw IOException("Couldn't read this YouTube page.")
         val details = player["videoDetails"] as? JsonObject
-        val title = details?.str("title") ?: "YouTube video"
-        val channel = details?.str("author").orEmpty()
-        val seconds = details?.str("lengthSeconds")?.toLongOrNull() ?: 0
-        val description = details?.str("shortDescription").orEmpty()
-
+        val micro = (player["microformat"] as? JsonObject)?.get("playerMicroformatRenderer") as? JsonObject
         val tracks = ((player["captions"] as? JsonObject)
             ?.get("playerCaptionsTracklistRenderer") as? JsonObject)
             ?.get("captionTracks") as? JsonArray
@@ -307,34 +445,107 @@ class WebTools(private val http: OkHttpClient, private val appContext: Context) 
         val track = trackList.firstOrNull { it.str("languageCode")?.startsWith("en") == true && it.str("kind") != "asr" }
             ?: trackList.firstOrNull { it.str("languageCode")?.startsWith("en") == true }
             ?: trackList.firstOrNull()
-        val transcript = track?.str("baseUrl")?.let { runCatching { captions(it) }.getOrNull() }.orEmpty()
-
-        val text = buildString {
-            append("YouTube video: $title\n")
-            if (channel.isNotEmpty()) append("Channel: $channel\n")
-            if (seconds > 0) append("Length: ${seconds / 60} min ${seconds % 60} s\n")
-            append("\nDescription:\n${description.take(3000)}\n\n")
-            if (transcript.isNotBlank()) append("Transcript:\n$transcript")
-            else append(
-                "(No transcript could be loaded for this video. Summarize from the title and description, say that the " +
-                    "transcript wasn't available, and tip the user: for a full summary, open the video in Pocket AI's " +
-                    "Browser tab, tap \"...more\" then \"Show transcript\", then type \"summarize\" in the browser's message bar.)"
-            )
-        }
-        return FetchedPage(title, original, text.take(60_000))
+        return VideoInfo(
+            title = details?.str("title") ?: "YouTube video",
+            channel = details?.str("author").orEmpty(),
+            seconds = details?.str("lengthSeconds")?.toLongOrNull() ?: 0,
+            description = details?.str("shortDescription").orEmpty(),
+            published = (micro?.str("publishDate") ?: micro?.str("uploadDate"))?.take(10),
+            views = details?.str("viewCount")?.toLongOrNull(),
+            captionsUrl = track?.str("baseUrl"),
+        )
     }
 
-    private fun captions(baseUrl: String): String {
+    /** The caption track as timed lines, or null when YouTube refuses it (it usually does since 2025). */
+    private fun captions(baseUrl: String): String? {
         val url = if (baseUrl.contains("fmt=")) baseUrl else "$baseUrl&fmt=json3"
         val raw = http.newCall(Request.Builder().url(url).header("User-Agent", UA).build()).execute().use { it.body?.string().orEmpty() }
-        if (raw.isBlank()) return ""
-        if (raw.trimStart().startsWith("{")) {
+        if (raw.isBlank()) return null
+        val lines = if (raw.trimStart().startsWith("{")) {
             val events = json.parseToJsonElement(raw).jsonObject["events"] as? JsonArray
-            return events.orEmpty().mapNotNull { ev ->
-                ((ev as? JsonObject)?.get("segs") as? JsonArray)?.joinToString("") { seg -> (seg as? JsonObject)?.str("utf8").orEmpty() }
-            }.joinToString(" ").replace(Regex("\\s+"), " ").trim()
+            events.orEmpty().mapNotNull { ev ->
+                val o = ev as? JsonObject ?: return@mapNotNull null
+                val t = (o["tStartMs"] as? kotlinx.serialization.json.JsonPrimitive)?.content?.toLongOrNull() ?: return@mapNotNull null
+                val text = (o["segs"] as? JsonArray)?.joinToString("") { seg -> (seg as? JsonObject)?.str("utf8").orEmpty() }
+                    ?.replace(Regex("\\s+"), " ")?.trim().orEmpty()
+                if (text.isEmpty()) null else "${t / 60_000}:${((t / 1000) % 60).toString().padStart(2, '0')} $text"
+            }
+        } else {
+            Jsoup.parse(raw).select("text").mapNotNull { el ->
+                val t = el.attr("start").toDoubleOrNull()?.toLong() ?: return@mapNotNull null
+                "${t / 60}:${(t % 60).toString().padStart(2, '0')} ${el.text()}"
+            }
         }
-        return Jsoup.parse(raw).select("text").joinToString(" ") { it.text() }.trim()
+        return Transcript.format(lines, TRANSCRIPT_TOKENS)
+    }
+
+    /**
+     * Opens the video's page in a hidden WebView and taps YouTube's own "Show transcript" button, the
+     * same thing a person does in a browser, then reads the transcript panel. Null if there's none.
+     */
+    @SuppressLint("SetJavaScriptEnabled")
+    private suspend fun transcriptFromPage(id: String): List<String>? = withContext(Dispatchers.Main) {
+        withTimeoutOrNull(22_000) {
+            suspendCancellableCoroutine { cont ->
+                val main = Handler(Looper.getMainLooper())
+                val wv = WebView(appContext)
+                wv.settings.javaScriptEnabled = true
+                wv.settings.domStorageEnabled = true
+                wv.settings.mediaPlaybackRequiresUserGesture = true
+                wv.settings.userAgentString = DESKTOP_UA
+                wv.layout(0, 0, 1280, 2400)
+                runCatching { CookieManager.getInstance().setCookie("https://www.youtube.com", "SOCS=CAI; path=/; domain=.youtube.com") }
+                var done = false
+                var started = false
+                var polls = 0
+                var noButton = 0
+                fun finish(lines: List<String>?) {
+                    if (done) return
+                    done = true
+                    runCatching { wv.stopLoading(); wv.destroy() }
+                    if (cont.isActive) cont.resume(lines)
+                }
+                lateinit var poll: Runnable
+                poll = Runnable {
+                    if (done) return@Runnable
+                    polls++
+                    wv.evaluateJavascript(TRANSCRIPT_JS) { res ->
+                        if (done) return@evaluateJavascript
+                        val o = runCatching { json.parseToJsonElement(json.decodeFromString<String>(res)).jsonObject }.getOrNull()
+                        val state = o?.str("s")
+                        val lines = (o?.get("lines") as? JsonArray)?.mapNotNull { (it as? kotlinx.serialization.json.JsonPrimitive)?.content }
+                            ?: o?.str("text")?.let { splitPanel(it) }
+                        when {
+                            state == "done" && !lines.isNullOrEmpty() -> finish(lines)
+                            state == "nobutton" && ++noButton >= 8 -> finish(null) // this video has no transcript
+                            polls >= 30 -> finish(null)
+                            else -> main.postDelayed(poll, 600)
+                        }
+                    }
+                }
+                wv.webViewClient = object : WebViewClient() {
+                    override fun onPageFinished(view: WebView?, u: String?) {
+                        if (!started) { started = true; main.postDelayed(poll, 1500) }
+                    }
+                }
+                main.postDelayed({ if (!started && !done) { started = true; poll.run() } }, 9_000)
+                cont.invokeOnCancellation { main.post { if (!done) { done = true; runCatching { wv.destroy() } } } }
+                wv.loadUrl("https://www.youtube.com/watch?v=$id&hl=en")
+            }
+        }
+    }
+
+    /** The transcript panel's text ("0:00\nWords\n0:04\nMore words") as "m:ss words" lines. */
+    private fun splitPanel(text: String): List<String> {
+        val out = mutableListOf<String>()
+        var ts: String? = null
+        for (raw in text.lines()) {
+            val l = raw.trim()
+            if (l.isEmpty()) continue
+            if (Regex("""^(\d{1,2}:)?\d{1,2}:\d{2}$""").matches(l)) ts = l
+            else if (ts != null) { out += "$ts $l"; ts = null }
+        }
+        return out
     }
 
     /** Finds `marker = {...}` in a page and returns the balanced JSON object text. */
@@ -363,25 +574,16 @@ class WebTools(private val http: OkHttpClient, private val appContext: Context) 
         return null
     }
 
-    private fun titleOf(html: String, url: String) = Jsoup.parse(html, url).title().ifBlank { url }
+    private fun cleanText(s: String): String = PageText.clean(s, MAX_PAGE_CHARS)
 
-    private fun htmlToText(html: String, url: String): String {
-        val doc = Jsoup.parse(html, url)
-        doc.select("script,style,noscript,svg,nav,footer,header,aside,form,iframe,button").remove()
-        val root = doc.selectFirst("main") ?: doc.selectFirst("article") ?: doc.body() ?: return ""
-        root.select("br").append("\\n")
-        root.select("p,div,li,h1,h2,h3,h4,h5,h6,tr,section,article,table").prepend("\\n")
-        return cleanText(root.text().replace("\\n", "\n"))
-    }
-
-    private fun cleanText(s: String): String =
-        s.lines().map { it.trim() }.filter { it.isNotEmpty() }.joinToString("\n").take(MAX_PAGE_CHARS)
-
-    /** Loads the page in an off-screen WebView so JavaScript runs, then reads document.body.innerText. */
+    /**
+     * Loads the page in an off-screen WebView so JavaScript runs, then cuts the finished page down to
+     * the article (or its visible text when it isn't an article).
+     */
     @SuppressLint("SetJavaScriptEnabled")
     private suspend fun render(url: String): FetchedPage? = withContext(Dispatchers.Main) {
-        withTimeoutOrNull(14_000) {
-            suspendCancellableCoroutine { cont ->
+        val raw = withTimeoutOrNull(14_000) {
+            suspendCancellableCoroutine<JsonObject?> { cont ->
                 val main = Handler(Looper.getMainLooper())
                 val wv = WebView(appContext)
                 wv.settings.javaScriptEnabled = true
@@ -393,15 +595,12 @@ class WebTools(private val http: OkHttpClient, private val appContext: Context) 
                     if (finished) return
                     finished = true
                     wv.evaluateJavascript(
-                        "(function(){return JSON.stringify({t:document.title||'',u:location.href,b:document.body?document.body.innerText:''})})()"
+                        "(function(){return JSON.stringify({t:document.title||'',u:location.href," +
+                            "b:document.body?document.body.innerText:'',h:document.documentElement.outerHTML.slice(0,3000000)})})()"
                     ) { res ->
-                        val page = runCatching {
-                            val inner = json.decodeFromString<String>(res)
-                            val o = json.parseToJsonElement(inner).jsonObject
-                            FetchedPage(o.str("t").orEmpty().ifBlank { url }, o.str("u") ?: url, cleanText(o.str("b").orEmpty()))
-                        }.getOrNull()
+                        val o = runCatching { json.parseToJsonElement(json.decodeFromString<String>(res)).jsonObject }.getOrNull()
                         wv.destroy()
-                        if (cont.isActive) cont.resume(page)
+                        if (cont.isActive) cont.resume(o)
                     }
                 }
                 wv.webViewClient = object : WebViewClient() {
@@ -413,6 +612,17 @@ class WebTools(private val http: OkHttpClient, private val appContext: Context) 
                 main.postDelayed({ finish() }, 10_000)
                 cont.invokeOnCancellation { main.post { if (!finished) { finished = true; wv.destroy() } } }
                 wv.loadUrl(url)
+            }
+        } ?: return@withContext null
+        val finalUrl = raw.str("u") ?: url
+        val innerText = cleanText(raw.str("b").orEmpty())
+        withContext(Dispatchers.Default) {
+            val html = raw.str("h").orEmpty()
+            val res = if (html.isNotBlank()) runCatching { PageText.extract(html, finalUrl, MAX_PAGE_CHARS) }.getOrNull() else null
+            when {
+                res != null && res.isArticle -> FetchedPage(res.title, finalUrl, res.text)
+                innerText.isNotBlank() -> FetchedPage(raw.str("t").orEmpty().ifBlank { url }, finalUrl, innerText)
+                else -> null
             }
         }
     }

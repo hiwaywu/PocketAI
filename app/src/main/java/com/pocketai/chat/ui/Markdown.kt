@@ -42,7 +42,9 @@ import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.withLink
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.withStyle
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
@@ -253,8 +255,24 @@ private fun CodeBlock(block: MdBlock.Code) {
 @Composable
 private fun TableBlock(rows: List<List<String>>, c: ColorScheme, onLink: (String) -> Unit) {
     val cols = rows.maxOf { it.size }
-    val widths = (0 until cols).map { ci ->
-        ((rows.maxOf { it.getOrNull(ci)?.length ?: 0 }).coerceIn(4, 28) * 8 + 20).dp
+    val style = MaterialTheme.typography.bodyMedium
+    val measurer = rememberTextMeasurer()
+    val density = LocalDensity.current
+    // Each column is as wide as its longest cell on one line (measured at the phone's real font size, so a
+    // time like "11:35" never breaks in two), up to 260dp; longer cells wrap.
+    val widths = remember(rows, style, density) {
+        (0 until cols).map { ci ->
+            val px = rows.mapIndexed { ri, row ->
+                val cell = row.getOrNull(ci).orEmpty()
+                if (cell.isEmpty()) 0 else measurer.measure(
+                    inlineMarkdown(cell, c) {},
+                    style = if (ri == 0) style.copy(fontWeight = FontWeight.Bold) else style,
+                    softWrap = false,
+                    maxLines = 1,
+                ).size.width
+            }.maxOrNull() ?: 0
+            with(density) { (px.toDp() + 18.dp).coerceIn(40.dp, 260.dp) }
+        }
     }
     val total = widths.fold(0.dp) { acc, w -> acc + w }
     Box(Modifier.horizontalScroll(rememberScrollState())) {
@@ -264,7 +282,7 @@ private fun TableBlock(rows: List<List<String>>, c: ColorScheme, onLink: (String
                     for (ci in 0 until cols) {
                         Text(
                             inlineMarkdown(row.getOrElse(ci) { "" }, c, onLink),
-                            style = MaterialTheme.typography.bodyMedium,
+                            style = style,
                             fontWeight = if (ri == 0) FontWeight.Bold else null,
                             modifier = Modifier.width(widths[ci]).padding(8.dp),
                         )

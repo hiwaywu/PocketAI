@@ -6,11 +6,17 @@ Owner's main provider is now NT Media (`https://api.ntmedia.store`, used ~99% of
 
 ## Build & run
 
-- Needs JDK 17+ (21 used) and Android SDK platform **37.2** (`platforms;android-37.2`; GeckoView and its AndroidX
-  deps require it), `local.properties` → `sdk.dir=...` (not committed). Toolchain (2.0): Gradle 9.8.2, AGP 9.5
-  (built-in Kotlin, no kotlin-android plugin), Kotlin 2.4.20, Compose BOM 2026.09.00. Maven Central often
-  answers 429 to cloud builds, so `settings.gradle.kts` lists Google's Maven Central mirror first.
-- APK is arm64-only (~100 MB; `abiFilters arm64-v8a`, native libs stored compressed).
+- Needs JDK 17+ (21 used) and Android SDK platform **37.2** (`platforms;android-37.2`), `local.properties` →
+  `sdk.dir=...` (not committed). Toolchain (2.0): Gradle 9.8.2, AGP 9.5 (built-in Kotlin, no kotlin-android
+  plugin), Kotlin 2.4.20, Compose BOM 2026.09.00. Maven Central often answers 429 to cloud builds, so
+  `settings.gradle.kts` lists Google's Maven Central mirror first. In a fresh cloud container: download the
+  command-line tools from dl.google.com, `sdkmanager "platforms;android-37.2" "build-tools;36.0.0"`.
+- APK is ~14 MB and runs on any phone (2.2 removed GeckoView, which made 2.0–2.1 ~100 MB and arm64-only). No R8
+  yet (`isMinifyEnabled = false`); turning it on would roughly quarter the size but needs a test on a real phone.
+- `./gradlew testDebugUnitTest`: JVM tests for the Reddit reader, article extraction and transcripts. To *see*
+  Compose screens without an emulator (no KVM in cloud containers), Robolectric 4.17 + `ui-test-junit4` with
+  `@GraphicsMode(NATIVE)` and `onRoot().captureToImage()` renders real PNGs; set
+  `robolectric.dependency.repo.url` to the Google Maven mirror. (Used in 2.2, not kept in the repo.)
 - `./gradlew assembleRelease` → `app/build/outputs/apk/release/app-release.apk`. Signed with the permanent
   release key when `keystore.properties` (git-ignored: storeFile, storePassword, keyAlias, keyPassword) or
   the `POCKETAI_KEYSTORE*` env vars are present; otherwise with the debug key, which can NOT update an
@@ -32,7 +38,7 @@ Asking anything containing "nba" makes the mock request a `web_search`, so the f
 (real search on the device → result → final answer) is exercised. It logs each request's size and
 roles to `mock_requests.log`.
 
-Emulator: the APK is arm64-only now (GeckoView), so use an arm64 emulator image or a real phone.
+Emulator: any image works again (no native code since 2.2).
 
 ## Code map (`app/src/main/java/com/pocketai/chat/`)
 
@@ -47,35 +53,42 @@ Emulator: the APK is arm64-only now (GeckoView), so use an arm64 emulator image 
   `buildApiMessages` (what gets re-sent each turn), API profile management, share handling, usage tracking.
 - `api/ChatClient.kt` — streaming `/chat/completions` (SSE), `/models` listing, `providerEndpoint()` URL rule
   (same as the owner's NovelAI app: append `/v1` unless the address already ends in a version path).
-- `api/WebTools.kt` — `web_search` (DeepSeek Search API, DuckDuckGo HTML, Brave, Tavily) and `fetch_url`
-  (DeepSeek Fetch API when DeepSeek is the engine → plain download + Jsoup → hidden-WebView render for
-  script-built pages), YouTube title/description (+captions when YouTube allows).
+- `api/WebTools.kt` — `web_search` (DeepSeek Search API, DuckDuckGo HTML, Brave, Tavily) and `fetch_url`:
+  YouTube → Reddit → article (own download + `PageText` → DeepSeek Fetch API when DeepSeek is the engine →
+  hidden-WebView render, whose finished HTML also goes through `PageText`). `onStatus` feeds the progress line.
+- `api/PageText.kt` — article-only text via Readability4J (Kotlin port of Mozilla Readability, Apache-2.0) when the
+  page declares itself an article (og:type / JSON-LD) or passes Mozilla's `isProbablyReaderable` (CJK-lowered
+  thresholds); else the whole page minus menus (front pages: Readability would keep one block). JSON-LD
+  `articleBody` wins when longer (teaser pages). Header line "Site · By … · Published yyyy-mm-dd". Lengths are
+  `weight()`ed (CJK ×2.5): a 300-character RTHK story is complete. Tested Nov 2026: RTHK 563→299 chars, BBC
+  article 5,015, NYPost 3,061, BBC/Guardian front pages kept whole. `Transcript` groups timed lines into 30 s
+  chunks and samples long videos evenly (~12k tokens).
+- `api/Reddit.kt` — threads via Reddit's JSON (`/comments/<id>/.json?sort=top&limit=200&depth=5&raw_json=1`;
+  app UA `android:com.pocketai.chat:<ver> (Pocket AI)` first, browser UA second), else the shreddit HTML
+  (`<shreddit-post>/<shreddit-comment>`); `/s/` share links are resolved with redirects off. Output: post stats
+  (score, % upvoted, comments, flair, age), media type, the linked article read through `fetch` (8k chars), then
+  ~14k chars of top comments with ↳ replies, upvotes, OP and flair marks (no usernames; AutoModerator/stickied
+  dropped), led by `Reddit.GUIDE` (how to summarize a thread). Reddit and YouTube refuse cloud IPs (403 / Google
+  "sorry" page), so these were tested with fixtures only; old.reddit.com now redirects logged-out users to login.
+- YouTube: metadata from `ytInitialPlayerResponse`; caption URLs usually return nothing (YouTube needs a PO token),
+  so `transcriptFromPage` opens the desktop watch page in a hidden WebView and clicks YouTube's own
+  "Show transcript" (`TRANSCRIPT_JS`, polled every 0.6 s, ≤22 s). That's the page's own UI, not an impersonated
+  client; written without device access, so verify on the phone. The guide asks for key moments linked as
+  `[m:ss](https://youtu.be/ID?t=S)`.
 - `data/Rates.kt` — NT Media per-model usage multipliers (from its price list; its API doesn't expose
   them). `ReplyUsage.multiplier`/`billed` = tokens × multiplier, shown in chat, usage dialog/screen, model menu.
 - `data/Settings.kt` — `AppSettings` (saved API profiles, search engine/keys), stored as one AES-GCM
   Android-Keystore-encrypted JSON blob. `data/Chats.kt` — chats as JSON files, `ReplyUsage`, photo import.
-- `ui/` — `AppRoot` (fold-aware: side-by-side ≥600dp, tabs when folded), `ChatScreen`, `BrowserPane`
-  (since 2.0 on **GeckoView** = Firefox's engine, `org.mozilla.geckoview:geckoview-arm64-v8a`, so it runs Firefox
-  add-ons. One `GeckoRuntime` per process in `PocketApp.gecko`; `BrowserController`: tabs = one `GeckoSession`
-  each (restored lazily from prefs), one `GeckoView` with the current session attached; bookmarks (new-tab tiles);
-  ⋮ menu with add-ons/find/share/copy/open externally/desktop mode/text size (`fontSizeFactor`, automatic font
-  size off)/Block ads/Unblock page; Chrome-style address pill that selects all on tap; prompt delegate for
-  alert/confirm/text/<select>; long-press link menu; `onNewSession` → new tab. **uBlock Origin** is installed from
-  AMO on first run (`uBlockInstalled` pref; not re-installed if the user removes it) and replaced the old
-  hosts-list `AdBlocker` (which broke NYT/NY Daily News). **Bypass Paywalls Clean** (2.1; MIT, Mozilla-signed for
-  self-distribution, not on AMO) is bundled as `assets/extensions/bypass_paywalls_clean.xpi` and installed the same
-  way (`FIRST_RUN_ADDONS`, `bpcInstalled` pref) from `resource://android/assets/…` (falls back to a cache-dir copy
-  via `file://`); it updates its site rules itself from gitflic. Add-ons dialog installs from an AMO link, a name or
-  a direct .xpi link.
-  The built-in add-on `assets/extensions/pocketai/` (content script + Mozilla Readability 0.5.0, Apache-2.0)
-  talks to the app over a native port ("browser"): `extract` → article-only text on article pages
-  (`isProbablyReaderable` with CJK-lowered thresholds, guarded since it throws on RTHK, or the page declares
-  itself an article), else `innerText`; `unblock` → removes cover layers/mid-screen popups, restores scrolling.
-  Article extraction tested in Playwright: RTHK 3,326→221 chars, hk01/NYPost/BBC −30–40%, RTHK list/Reddit
-  unchanged (sidebar headlines leaked into summaries before).
+- `ui/` — `AppRoot` (fold-aware: chat list as a permanent side panel ≥600dp, drawer when folded), `ChatList`
+  (search titles + text, Pinned, date groups, ⋮ Pin/Rename/Share/Delete), `ChatScreen` (long-press own message →
+  Copy / Edit and resend; reply actions Copy, Share, Read aloud, Regenerate; follow-up chips only under the first
+  reply of a link chat; mic = voice typing via `RecognizerIntent`; jump-to-newest button), `Links` (links open in
+  their own app via `FLAG_ACTIVITY_REQUIRE_NON_BROWSER`, else a Chrome Custom Tab; share sheet; chat export),
   `SettingsScreen` (NovelAI-style saved APIs + "Save this API setting?" prompt + Load models),
   `UsageScreen` (per-reply and overall token breakdown; filter chips per API *name* — `ReplyUsage.apiName`
-  since 1.10; the owner wants names only, no key hints), `Markdown` (small renderer).
+  since 1.10; the owner wants names only, no key hints), `Markdown` (small renderer; table columns measured with
+  `TextMeasurer` so "11:35" never wraps). `Speaker.kt` — read aloud with the phone's TTS (needs the
+  `TTS_SERVICE` `<queries>` entry), CJK text → zh-HK voice.
 
 ## Decisions so far
 
@@ -109,8 +122,14 @@ Emulator: the APK is arm64-only now (GeckoView), so use an arm64 emulator image 
   DeepSeek's *built-in* `web_search` tool only exists in its Responses API with `deepseek-v4-pro`; not used.
 - Only the OpenAI Chat Completions format is implemented. The NovelAI app also supports Anthropic format
   (`/v1/messages`) — a possible addition, which would also allow Claude's server-side web search via MWAPI.
-- YouTube caption downloads are blocked by YouTube; don't try to impersonate YouTube app clients.
-  The workaround is the in-app browser: *...more → Show transcript*, then ask in the browser's message bar.
+- YouTube caption downloads are blocked by YouTube; don't try to impersonate YouTube app clients. 2.2 reads the
+  transcript panel in a hidden WebView instead (see YouTube above).
+- The in-app browser (1.4–2.1; GeckoView + uBlock Origin + Bypass Paywalls Clean in 2.0–2.1) was removed in 2.2 at
+  the owner's request ("I don't need the browser", for size). Links from chats open in their app or a Custom Tab.
+- Summaries (2.2): general rules (TL;DR first, shape by content type, phone-friendly, no wide tables, no "I'll open
+  that page" narration) live in the system prompt; per-type guides (Reddit, YouTube) travel inside the tool result
+  so ordinary chats don't pay for them. Text a model writes before a tool call is removed from the screen.
+  Chats started from "Summarize this …: <link>" are renamed after the page title.
 - OpenCode Go (`https://opencode.ai/inference/go/v1`; old `/zen/go/v1` also answers) rejects requests
   without `x-opencode-session` (400 MissingSessionID). `ChatClient` sends the chat id there for opencode.ai
   hosts, and a `PocketAI/<version> (Android)` User-Agent everywhere. OpenCode says Go is designed for coding

@@ -14,15 +14,29 @@ import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
 
+/**
+ * The default custom instructions (2.6): written in the style of a good chat assistant, at the owner's request
+ * ("like you"). Deliberately no assistant name: the owner checks whether providers are honest about their model.
+ */
 const val DEFAULT_SYSTEM_PROMPT =
+    "You're a helpful assistant in a chat app on the user's phone. Be warm and direct, like a knowledgeable " +
+        "friend: answer the actual question first, add what's genuinely useful, and stop when you're done. Match " +
+        "the length to the question; a quick question gets a quick answer. Write in natural prose, and use lists, " +
+        "headings or bold only when they really make something easier to read. Be honest: if you're unsure or " +
+        "don't know, say so instead of guessing, and kindly point out a mistaken assumption. When asked for an " +
+        "opinion or a recommendation, give one and say why. Skip filler like \"Great question!\", don't repeat " +
+        "the question back, and don't end with offers of more help."
+
+/** Earlier built-in instructions; a saved copy of one of these (never edited) is upgraded to the current default. */
+private val OLD_DEFAULT_PROMPTS = listOf(
+    // 1.0–1.1
+    "You are a helpful, friendly assistant chatting with the user on their Android phone. " +
+        "Be clear and concise, and use Markdown formatting when it helps readability.",
+    // 1.2–2.5
     "You are a helpful, friendly assistant chatting with the user on their Android phone. " +
         "Answer the question directly first, then add useful detail. Keep a natural, conversational tone, " +
-        "be concise, and use Markdown (lists, tables, bold) when it helps readability."
-
-/** The default instructions shipped in 1.0/1.1. */
-private const val OLD_DEFAULT_PROMPT =
-    "You are a helpful, friendly assistant chatting with the user on their Android phone. " +
-        "Be clear and concise, and use Markdown formatting when it helps readability."
+        "be concise, and use Markdown (lists, tables, bold) when it helps readability.",
+)
 
 /** Quick-fill addresses shown under the API address field. The user can type any address. */
 val ADDRESS_SUGGESTIONS = listOf(
@@ -117,7 +131,7 @@ class SettingsStore(context: Context) {
         val plain = Crypto.decrypt(enc) ?: return AppSettings()
         val s = runCatching { json.decodeFromString<AppSettings>(plain) }.getOrDefault(AppSettings())
         // Upgrade the built-in instructions from older versions; edited instructions are left alone.
-        return if (s.systemPrompt.trim() == OLD_DEFAULT_PROMPT) s.copy(systemPrompt = DEFAULT_SYSTEM_PROMPT) else s
+        return if (s.systemPrompt.trim() in OLD_DEFAULT_PROMPTS) s.copy(systemPrompt = DEFAULT_SYSTEM_PROMPT) else s
     }
 
     fun save(settings: AppSettings) {

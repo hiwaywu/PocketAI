@@ -20,9 +20,13 @@ Owner's main provider is now NT Media (`https://api.ntmedia.store`, used ~99% of
 - `./gradlew assembleRelease` → `app/build/outputs/apk/release/app-release.apk`. Signed with the permanent
   release key when `keystore.properties` (git-ignored: storeFile, storePassword, keyAlias, keyPassword) or
   the `POCKETAI_KEYSTORE*` env vars are present; otherwise with the debug key, which can NOT update an
-  installed app. The key is never committed; the owner keeps a copy, and GitHub has it as the secrets
-  `POCKETAI_KEYSTORE_BASE64` / `POCKETAI_KEYSTORE_PASSWORD`. (1.0–1.2 and the 1.3 test builds used throwaway debug keys, so 1.4
-  needed one reinstall.)
+  installed app. The key is never committed. (1.0–1.2 and the 1.3 test builds used throwaway debug keys, so 1.4
+  needed one reinstall.) The 1.4 key turned out to be unavailable: the GitHub secrets were never set (the 2.1 and
+  2.2 workflow runs failed at "Release key"), so a **new key** was made for 2.2 at the owner's request
+  (`CN=Pocket AI`, alias `pocketai`, cert SHA-256 `a443e9e6…6612373`), and 2.2 needed one reinstall. The owner has the
+  .jks and password; until they add them as the secrets `POCKETAI_KEYSTORE_BASE64` / `POCKETAI_KEYSTORE_PASSWORD`
+  (sessions can't set secrets), the Release APK workflow can't sign. Never make yet another key without asking:
+  every new key forces a reinstall that wipes chats.
 - Releases: bump `versionCode`/`versionName` in `app/build.gradle.kts`, write `release-notes/v<version>.md`,
   merge to `main`, then run the **Release APK** workflow (`.github/workflows/release.yml`, workflow_dispatch
   with input `version`). It builds the APK with the release key and creates the GitHub release.

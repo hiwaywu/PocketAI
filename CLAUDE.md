@@ -102,6 +102,12 @@ Emulator: any image works again (no native code since 2.2).
   `screen/SameTopic.kt` decides on each tap — different app or >30 min → new; both page links known → same link?;
   else ≥20% of the longer lines shared with the chat's last screen (`ChatMessage.pageApp/pageText`); too little text
   to compare → continue. A new chat offers "↩ Continue last chat".
+  2.9 (device test: 522 chars incl. the title, but the model ignored YOUTUBE_NOTE and searched news sites): on the
+  video page the service clicks the title's "...more" (`ScreenText.isMoreLink`), scrolls the description panel to
+  "Show transcript", clicks it and reads the panel (YouTube app UI seen in the owner's screenshots: Description →
+  Transcript → "Show transcript"; Transcript panel rows = time chip + text). If that fails, the app itself searches
+  YouTube with `ScreenText.titleCandidates` and matches by longest shared text (`YouTubeSearch.bestMatch`), then
+  passes the exact link (`youTubeLinkNote`, also capture.url for SameTopic).
 - `data/Rates.kt` — NT Media per-model usage multipliers (from its price list; its API doesn't expose
   them). `ReplyUsage.multiplier`/`billed` = tokens × multiplier, shown in chat, usage dialog/screen, model menu.
 - `data/Settings.kt` — `AppSettings` (saved API profiles, search engine/keys), stored as one AES-GCM

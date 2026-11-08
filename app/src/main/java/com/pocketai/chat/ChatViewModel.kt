@@ -376,6 +376,9 @@ class ChatViewModel(private val app: Application) : AndroidViewModel(app) {
         return if (send(question, if (attach) pageOf(capture) else null)) existing.id else null
     }
 
+    /** For the Pocket AI button in the YouTube app: finds the video on YouTube by the title read from the screen. */
+    suspend fun findYouTubeVideo(titles: List<String>): String? = web.findYouTubeVideo(titles)
+
     /** A chat by id, whether it's open in the main app or in the list. */
     fun chat(id: String): Conversation? = convOf(id)
 

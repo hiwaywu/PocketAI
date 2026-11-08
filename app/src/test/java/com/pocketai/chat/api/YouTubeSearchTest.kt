@@ -36,4 +36,13 @@ class YouTubeSearchTest {
         assertNull(YouTubeSearch.query("https://www.youtube.com/watch?v=0-WuSH5TwxE"))
         assertNull(YouTubeSearch.query("https://example.com/results?search_query=x"))
     }
+
+    @Test fun matchesTheVideoOnScreen() {
+        val v = YouTubeSearch.parse(html)
+        // A chapter title shown over the player, or the full title, both find it; an unrelated line doesn't.
+        assertEquals("0-WuSH5TwxE", YouTubeSearch.bestMatch("TVB 台慶劇 璀璨之城", v)?.id)
+        assertEquals("0-WuSH5TwxE", YouTubeSearch.bestMatch("台慶劇璀璨之城 full episode recap and more", v.reversed())?.id)
+        assertEquals("abcdefghijk", YouTubeSearch.bestMatch("Another video", v)?.id)
+        assertNull(YouTubeSearch.bestMatch("Completely different words here", v))
+    }
 }

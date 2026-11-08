@@ -548,17 +548,28 @@ return JSON.stringify({s:ready?'nobutton':'loading'});
 
     /** YouTube's own search page, as a list of videos with links (used to find a video seen in the YouTube app). */
     private suspend fun youtubeSearch(q: String): FetchedPage = withContext(Dispatchers.IO) {
-        val html = http.newCall(
-            Request.Builder().url(YouTubeSearch.searchUrl(q))
-                .header("User-Agent", DESKTOP_UA)
-                .header("Accept-Language", "en-US,en;q=0.9")
-                .header("Cookie", "CONSENT=YES+1; SOCS=CAI")
-                .build()
-        ).execute().use { r ->
-            if (!r.isSuccessful) throw IOException("YouTube search returned HTTP ${r.code}")
-            r.body?.string().orEmpty()
-        }
+        val html = youtubeSearchPage(q)
         FetchedPage("YouTube search: $q", YouTubeSearch.searchUrl(q), YouTubeSearch.format(q, YouTubeSearch.parse(html)))
+    }
+
+    private fun youtubeSearchPage(q: String): String = http.newCall(
+        Request.Builder().url(YouTubeSearch.searchUrl(q))
+            .header("User-Agent", DESKTOP_UA)
+            .header("Accept-Language", "en-US,en;q=0.9")
+            .header("Cookie", "CONSENT=YES+1; SOCS=CAI")
+            .build()
+    ).execute().use { r ->
+        if (!r.isSuccessful) throw IOException("YouTube search returned HTTP ${r.code}")
+        r.body?.string().orEmpty()
+    }
+
+    /** The link of the video whose title is one of [titles] (lines read from the YouTube app), or null. */
+    suspend fun findYouTubeVideo(titles: List<String>): String? = withContext(Dispatchers.IO) {
+        for (t in titles.take(3)) {
+            val videos = runCatching { YouTubeSearch.parse(youtubeSearchPage(t)) }.getOrNull() ?: continue
+            YouTubeSearch.bestMatch(t, videos)?.let { return@withContext it.link }
+        }
+        null
     }
 
     private fun cleanText(s: String): String = PageText.clean(s, MAX_PAGE_CHARS)

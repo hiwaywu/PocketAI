@@ -73,4 +73,18 @@ class ScreenTextTest {
         assertFalse(ScreenText.looksLikeAddress("2.1k"))
         assertFalse(ScreenText.looksLikeAddress("v4.1"))
     }
+
+    @Test fun youTubeTitleCandidates() {
+        val screen = listOf(
+            "2:04 / 21:25", "張曦雯7分鐘脫衣戲被剪剩2秒：TVB宣傳榨乾 臨門卸責", "6,597 views 2 hours ago ...more",
+            "八八卦卦", "88.4K subscribers", "Subscribe", "Like this video along with 120 other people", "Share",
+            "Comments 45", "Kelly Cheung", "This is what people should know about TVB dramas",
+        )
+        val c = ScreenText.titleCandidates(screen)
+        assertEquals("張曦雯7分鐘脫衣戲被剪剩2秒：TVB宣傳榨乾 臨門卸責", c.first())
+        assertFalse(c.any { it.contains("views") || it.startsWith("Like") || it == "Subscribe" })
+        assertTrue(ScreenText.isMoreLink("6,597 views 2 hours ago ...more"))
+        assertTrue(ScreenText.isMoreLink("…more"))
+        assertFalse(ScreenText.isMoreLink("Show transcript"))
+    }
 }

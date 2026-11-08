@@ -89,8 +89,22 @@ class AskService : AccessibilityService() {
         // Newer Firefox draws its address bar without a fixed id: fall back to text shaped like a web address in
         // the browser's own toolbar (not in the page).
         if (bar.isNullOrBlank() && browser) bar = w.addressBars.firstOrNull() ?: w.addresses.firstOrNull()
-        val (url, site) = ScreenText.linkFromBar(bar)
+        var (url, site) = ScreenText.linkFromBar(bar)
         val screenText = ScreenText.clean(w.pieces)
+        // No transcript from the app: find the video on YouTube by the title on screen, so the AI gets its exact
+        // link (and reads that video's transcript) instead of searching news sites about it.
+        val videoLink = if (pkg == ScreenText.YOUTUBE && transcript == null) {
+            val titles = ScreenText.titleCandidates(w.pieces)
+            if (titles.isEmpty()) null else {
+                toast("Finding the video…")
+                runCatching {
+                    kotlinx.coroutines.runBlocking {
+                        kotlinx.coroutines.withTimeoutOrNull(9_000) { (application as PocketApp).chat.findYouTubeVideo(titles) }
+                    }
+                }.getOrNull()
+            }
+        } else null
+        if (videoLink != null) url = videoLink
         val label = runCatching {
             packageManager.getApplicationLabel(packageManager.getApplicationInfo(pkg ?: "", 0)).toString()
         }.getOrNull()
@@ -103,7 +117,9 @@ class AskService : AccessibilityService() {
             text = transcript?.let {
                 "Transcript (read from the YouTube app's transcript panel; [m:ss] = time in the video):\n$it\n\nRest of the screen:\n$screenText"
             } ?: screenText,
-            note = if (pkg == ScreenText.YOUTUBE && transcript == null) ScreenText.YOUTUBE_NOTE else null,
+            note = if (pkg == ScreenText.YOUTUBE && transcript == null) {
+                if (videoLink != null) ScreenText.youTubeLinkNote(videoLink) else ScreenText.YOUTUBE_NOTE
+            } else null,
         )
     }
 
@@ -116,12 +132,33 @@ class AskService : AccessibilityService() {
         var root = start
         var list = transcriptList(root)
         if (list == null) {
-            val button = findLabel(root, "show transcript") ?: return null
-            val target = generateSequence(button) { it.parent }.firstOrNull { it.isClickable } ?: return null
-            if (!target.performAction(AccessibilityNodeInfo.ACTION_CLICK)) return null
+            var button = findLabel(root, "show transcript")
+            if (button == null) {
+                // On the video page: open the description (the title's "...more"), where "Show transcript" lives,
+                // scrolling down to it if needed.
+                val more = findText(root) { ScreenText.isMoreLink(it) } ?: return null
+                toast("Opening the transcript…")
+                if (!click(more)) return null
+                for (i in 0 until 12) {
+                    Thread.sleep(250)
+                    root = currentRoot() ?: root
+                    button = findLabel(root, "show transcript")
+                    if (button != null) break
+                }
+                for (i in 0 until 8) {
+                    if (button != null) break
+                    val panel = descriptionList(root) ?: break
+                    if (!panel.performAction(AccessibilityNodeInfo.ACTION_SCROLL_FORWARD)) break
+                    Thread.sleep(350)
+                    root = currentRoot() ?: root
+                    button = findLabel(root, "show transcript")
+                }
+                button ?: return null
+            }
+            if (!click(button)) return null
             for (i in 0 until 16) {
                 Thread.sleep(250)
-                root = appWindow()?.root ?: rootInActiveWindow ?: root
+                root = currentRoot() ?: root
                 list = transcriptList(root)
                 if (list != null) break
             }
@@ -144,6 +181,42 @@ class AskService : AccessibilityService() {
         }
         if (segments.size < 3) return null
         return com.pocketai.chat.api.Transcript.format(segments.values.toList(), 12_000)
+    }
+
+    private fun currentRoot(): AccessibilityNodeInfo? = appWindow()?.root ?: rootInActiveWindow
+
+    /** Taps a node (or the nearest tappable thing around it). */
+    private fun click(node: AccessibilityNodeInfo): Boolean =
+        generateSequence(node) { it.parent }.firstOrNull { it.isClickable }?.performAction(AccessibilityNodeInfo.ACTION_CLICK) == true
+
+    /** A node whose text or label passes [test]. */
+    private fun findText(root: AccessibilityNodeInfo, test: (String) -> Boolean): AccessibilityNodeInfo? {
+        val stack = ArrayDeque<AccessibilityNodeInfo>().apply { add(root) }
+        var seen = 0
+        while (stack.isNotEmpty() && seen < 3_000) {
+            val n = stack.removeFirst()
+            seen++
+            if (n.isVisibleToUser) for (t in listOfNotNull(n.text, n.contentDescription)) if (test(t.toString().trim())) return n
+            for (i in 0 until n.childCount) runCatching { n.getChild(i) }.getOrNull()?.let { stack.add(it) }
+        }
+        return null
+    }
+
+    /** The scrolling list of YouTube's description panel (it holds "Video details" / "Transcript"). */
+    private fun descriptionList(root: AccessibilityNodeInfo): AccessibilityNodeInfo? {
+        val stack = ArrayDeque<AccessibilityNodeInfo>().apply { add(root) }
+        var seen = 0
+        var found: AccessibilityNodeInfo? = null
+        while (stack.isNotEmpty() && seen < 3_000) {
+            val n = stack.removeLast()
+            seen++
+            if (n.isScrollable && n.isVisibleToUser) {
+                val t = texts(n).joinToString(" ").lowercase()
+                if ("transcript" in t || "video details" in t || "description" in t) found = n
+            }
+            for (i in 0 until n.childCount) runCatching { n.getChild(i) }.getOrNull()?.let { stack.add(it) }
+        }
+        return found
     }
 
     /** A scrolling list on screen whose items look like transcript lines (a time, then words). */

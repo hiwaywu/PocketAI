@@ -52,12 +52,41 @@ object ScreenText {
 
     /** Sent with a YouTube app screen when its transcript couldn't be read there. */
     const val YOUTUBE_NOTE =
-        "[Pocket AI: this is the YouTube app, which doesn't show the video's link. If the user asks what the video " +
+        "[Pocket AI: this is the YouTube app, which doesn't show the video's link (it couldn't be found automatically). " +
+            "If the user asks what the video " +
             "says (a summary, the transcript, details), first call fetch_url on https://www.youtube.com/results?search_query= " +
             "followed by the video's exact title from the screen (plus the channel name), then call fetch_url on the " +
-            "matching video's link to read its details and transcript. Don't ask the user for the link; find it this way. " +
+            "matching video's link to read its details and transcript. Don't ask the user for the link, and don't search " +
+            "news sites about it instead; find the video this way. " +
             "Only if no title is on the screen (e.g. the video is full screen), ask them to exit full screen and tap the " +
             "Pocket AI button again.]"
+
+    /** For when the app found the video on YouTube by its title. */
+    fun youTubeLinkNote(link: String) =
+        "[Pocket AI: this is the YouTube app; the video on screen is $link. If the user asks what the video says (a " +
+            "summary, the transcript, details), call fetch_url on that link: it returns the video's details and its " +
+            "transcript. Don't search news sites about it instead.]"
+
+    /** YouTube's "...more" under the title (opens the description) and similar labels. */
+    fun isMoreLink(t: String): Boolean {
+        val s = t.trim().lowercase()
+        return s.endsWith("...more") || s.endsWith("…more") || s.endsWith("... more") || s == "more" ||
+            s == "show more" || s.contains("expand description") || s == "description"
+    }
+
+    private val NOT_TITLE = Regex(
+        """(?i)^(\d[\d.,]*\s*[kmb]?\s*(views?|subscribers?|likes?|comments?|watching)\b|.*\b\d+\s*(seconds?|minutes?|hours?|days?|weeks?|months?|years?)\s+ago\b|subscribe|share|download|remix|save|clip|thanks|comments?$|like this video|dislike this video|more actions|search transcript|transcript$)""",
+    )
+
+    /**
+     * Lines from a YouTube app screen that could be the video's title (searched on YouTube to find its link),
+     * best first: longer lines that aren't counts, dates or buttons.
+     */
+    fun titleCandidates(pieces: List<String>): List<String> =
+        pieces.map { it.trim() }
+            .filter { com.pocketai.chat.api.PageText.weight(it) >= 16 && it.length <= 200 && !NOT_TITLE.containsMatchIn(it) && !isTimestamp(it) }
+            .distinct()
+            .take(4)
 
     private val TIMESTAMP = Regex("""^(\d{1,2}:)?\d{1,2}:\d{2}$""")
     private val TIMED_LINE = Regex("""^((?:\d{1,2}:)?\d{1,2}:\d{2})\s+(.+)$""")

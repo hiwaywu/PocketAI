@@ -81,6 +81,8 @@ data class ChatMessage(
     val pageText: String? = null,
     /** Where the page came from: null = the old built-in browser, "screen" = the Pocket AI button, "selection" = selected text. */
     val pageSource: String? = null,
+    /** The app a screen or selection came from (package name), to tell whether a new tap is about the same thing. */
+    val pageApp: String? = null,
     val toolEvents: List<ToolEvent> = emptyList(),
     val sources: List<Source> = emptyList(),
     /** Tool-call turns (OpenAI format) that led to this answer, replayed in later requests. */

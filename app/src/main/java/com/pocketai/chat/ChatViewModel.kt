@@ -55,7 +55,7 @@ import java.util.Locale
 import java.util.concurrent.TimeUnit
 
 /** Text sent along with a message: another app's screen or selected text. */
-data class PageContext(val title: String, val url: String?, val text: String, val source: String)
+data class PageContext(val title: String, val url: String?, val text: String, val source: String, val app: String? = null)
 
 data class UiState(
     val settings: AppSettings,
@@ -92,10 +92,14 @@ class ChatViewModel(private val app: Application) : AndroidViewModel(app) {
 
     private val jobs = mutableMapOf<String, Job>()
 
+    /** Completed once the saved chats are read from disk (declared before init, which completes it). */
+    private val chatsLoaded = kotlinx.coroutines.CompletableDeferred<Unit>()
+
     init {
         viewModelScope.launch(Dispatchers.IO) {
             val list = repo.list()
             _state.update { it.copy(conversations = list) }
+            chatsLoaded.complete(Unit)
         }
     }
 
@@ -319,6 +323,7 @@ class ChatViewModel(private val app: Application) : AndroidViewModel(app) {
         val user = ChatMessage(
             role = "user", text = trimmed, images = st.pendingImages,
             pageTitle = page?.title, pageUrl = page?.url, pageText = page?.text, pageSource = page?.source,
+            pageApp = page?.app,
         )
         val conv = st.current.copy(
             messages = st.current.messages + user,
@@ -346,8 +351,18 @@ class ChatViewModel(private val app: Application) : AndroidViewModel(app) {
 
     private fun pageOf(capture: com.pocketai.chat.screen.ScreenCapture?): PageContext? =
         capture?.takeIf { it.text.isNotBlank() }?.let {
-            PageContext(it.label, it.url, listOfNotNull(it.note, it.text).joinToString("\n\n"), it.kind)
+            PageContext(it.label, it.url, listOfNotNull(it.note, it.text).joinToString("\n\n"), it.kind, it.packageName)
         }
+
+    /** What [chatId] was last about (its newest screen or selection), for [com.pocketai.chat.screen.SameTopic]. */
+    fun lastScreen(chatId: String, at: Long): com.pocketai.chat.screen.SameTopic.Last? {
+        val m = convOf(chatId)?.messages?.lastOrNull { it.role == "user" && it.pageSource != null && it.pageText != null } ?: return null
+        return com.pocketai.chat.screen.SameTopic.Last(m.pageApp, m.pageUrl, m.pageText.orEmpty(), at)
+    }
+
+
+    /** Waits until the saved chats are loaded (right after the app starts they're still being read). */
+    suspend fun awaitChats() = chatsLoaded.await()
 
     /**
      * A question in the panel over another app. Continues [chatId] when it still exists (tapping the Pocket AI

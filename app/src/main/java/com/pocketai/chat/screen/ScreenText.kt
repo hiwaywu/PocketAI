@@ -104,8 +104,11 @@ object ScreenText {
     private val ADDRESS = Regex("""^(https?://)?([a-z0-9-]+\.)+[a-z]{2,}(:\d+)?(/\S*)?$""", RegexOption.IGNORE_CASE)
 
     /** Text shaped like a web address ("nytimes.com/2026/…", "https://…"), as a browser's address bar shows it. */
+    /** Invisible direction marks some browsers wrap the address in. */
+    private val MARKS = Regex("[\\u200B-\\u200F\\u202A-\\u202E\\u2066-\\u2069\\uFEFF]")
+
     fun looksLikeAddress(t: String): Boolean {
-        val s = t.trim()
+        val s = t.replace(MARKS, "").trim().removeSuffix("…")
         return s.length in 4..2000 && !s.contains(' ') && ADDRESS.matches(s)
     }
 
@@ -114,7 +117,7 @@ object ScreenText {
      * no link to read, just the site's name.
      */
     fun linkFromBar(raw: String?): Pair<String?, String?> {
-        val t = raw?.trim()?.replace(" ", "").orEmpty()
+        val t = raw?.replace(MARKS, "")?.trim()?.removeSuffix("…")?.replace(" ", "").orEmpty()
         if (t.isEmpty() || !t.contains('.') || t.contains('\n')) return null to null
         val full = if (t.startsWith("http://", true) || t.startsWith("https://", true)) t else "https://$t"
         val u = full.toHttpUrlOrNull() ?: return null to null

@@ -86,6 +86,8 @@ fun AskPanel(
     capture: ScreenCapture?,
     captureSent: Boolean,
     chatId: String?,
+    lastChatId: String?,
+    onContinueLast: () -> Unit,
     onSent: (String) -> Unit,
     onNewChat: () -> Unit,
     onClose: () -> Unit,
@@ -190,6 +192,14 @@ fun AskPanel(
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(horizontal = 20.dp, vertical = 6.dp),
                     )
+                }
+
+                // A new page started a new chat; one tap goes back to the previous one if they're related after all.
+                val last = lastChatId?.let { id -> state.conversations.firstOrNull { it.id == id } ?: state.current.takeIf { it.id == id } }
+                if (last != null && (conv == null || conv.messages.isEmpty())) {
+                    TextButton(onClick = onContinueLast, modifier = Modifier.padding(horizontal = 8.dp)) {
+                        Text("↩ Continue last chat: ${last.title}", maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    }
                 }
 
                 if (conv != null && conv.messages.isNotEmpty()) {

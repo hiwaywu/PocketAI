@@ -63,7 +63,7 @@ private fun usageParts(u: ReplyUsage): List<Part> {
         Part("Chat history", u.estHistory, c.primary),
         Part("Web results", u.estWeb, c.tertiary),
         Part("Photos", u.estPhotos, c.secondary),
-        Part("Shared pages", u.estShared, c.error),
+        Part("Shared pages & screens", u.estShared, c.error),
         Part("AI's reply (output)", u.output, c.outline),
     )
 }

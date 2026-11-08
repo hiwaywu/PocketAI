@@ -1,5 +1,8 @@
 package com.pocketai.chat.ui
 
+import android.content.Intent
+import android.net.Uri
+import android.provider.Settings
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -55,7 +58,10 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.platform.LocalContext
+import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.pocketai.chat.screen.AskService
 import com.pocketai.chat.ChatViewModel
 import com.pocketai.chat.data.ADDRESS_SUGGESTIONS
 import com.pocketai.chat.data.DEFAULT_SYSTEM_PROMPT
@@ -249,6 +255,9 @@ fun SettingsScreen(vm: ChatViewModel, onClose: () -> Unit) {
                 }
 
                 HorizontalDivider(Modifier.padding(vertical = 8.dp))
+                AskButtonSection()
+
+                HorizontalDivider(Modifier.padding(vertical = 8.dp))
                 SectionTitle("Web tools")
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
@@ -430,4 +439,52 @@ private fun Dropdown(label: String, value: String, options: List<String>, onSele
             }
         }
     }
+}
+
+/**
+ * Setup for the Pocket AI button in other apps (an accessibility service). Android hides that switch for
+ * apps not installed from the Play Store until "Allow restricted settings" is tapped in App info.
+ */
+@Composable
+private fun AskButtonSection() {
+    val context = LocalContext.current
+    var on by remember { mutableStateOf(AskService.isOn(context)) }
+    LifecycleResumeEffect(Unit) {
+        on = AskService.isOn(context)
+        onPauseOrDispose {}
+    }
+    SectionTitle("Pocket AI in other apps")
+    Text(
+        if (on) "✅ The Pocket AI button is on. Tap it in any app (Firefox, Reddit, YouTube…) to ask about what's on the screen."
+        else "Add a Pocket AI button to every app: tap it to ask about what's on the screen. Gemini keeps the side button.",
+        style = MaterialTheme.typography.bodyMedium,
+    )
+    if (!on) {
+        Text(
+            "1. Tap Accessibility settings → Installed apps → Ask Pocket AI → turn it on, and choose the floating " +
+                "button as its shortcut.\n2. If Android says \"Restricted setting\", tap App info → ⋮ → Allow restricted " +
+                "settings, then try step 1 again.\nAndroid shows its standard warning for accessibility apps; Pocket AI " +
+                "only reads the screen when you tap its button.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        FilledTonalButton(onClick = {
+            runCatching { context.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
+        }) { Text("Accessibility settings") }
+        if (!on) OutlinedButton(onClick = {
+            runCatching {
+                context.startActivity(
+                    Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.fromParts("package", context.packageName, null))
+                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                )
+            }
+        }) { Text("App info") }
+    }
+    Text(
+        "Also: select text in any app → ⋮ → Ask Pocket AI.",
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
 }

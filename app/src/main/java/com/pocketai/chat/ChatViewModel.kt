@@ -54,6 +54,9 @@ import java.util.Date
 import java.util.Locale
 import java.util.concurrent.TimeUnit
 
+/** Text sent along with a message: another app's screen or selected text. */
+data class PageContext(val title: String, val url: String?, val text: String, val source: String)
+
 data class UiState(
     val settings: AppSettings,
     val current: Conversation = Conversation(),
@@ -300,8 +303,11 @@ class ChatViewModel(private val app: Application) : AndroidViewModel(app) {
         }
     }
 
-    /** Returns false when the message couldn't be sent (e.g. no API set up). */
-    fun send(text: String): Boolean {
+    /**
+     * Returns false when the message couldn't be sent (e.g. no API set up). [page] attaches another app's
+     * screen or selected text; [title] names a new chat.
+     */
+    fun send(text: String, page: PageContext? = null, title: String? = null): Boolean {
         val st = state.value
         if (st.streaming) return false
         if (!st.settings.isConfigured) {
@@ -309,17 +315,44 @@ class ChatViewModel(private val app: Application) : AndroidViewModel(app) {
             return false
         }
         val trimmed = text.trim()
-        if (trimmed.isEmpty() && st.pendingImages.isEmpty()) return false
-        val user = ChatMessage(role = "user", text = trimmed, images = st.pendingImages)
+        if (trimmed.isEmpty() && st.pendingImages.isEmpty() && page == null) return false
+        val user = ChatMessage(
+            role = "user", text = trimmed, images = st.pendingImages,
+            pageTitle = page?.title, pageUrl = page?.url, pageText = page?.text, pageSource = page?.source,
+        )
         val conv = st.current.copy(
             messages = st.current.messages + user,
-            title = if (st.current.messages.isEmpty()) makeTitle(user) else st.current.title,
+            title = if (st.current.messages.isEmpty()) (title ?: makeTitle(user)) else st.current.title,
             updatedAt = System.currentTimeMillis(),
         )
         _state.update { it.copy(pendingImages = emptyList()) }
         runAssistant(conv)
         return true
     }
+
+    /**
+     * The panel over another app: starts a new chat with what the Pocket AI button read (or the selected text)
+     * and [question]. Returns the chat's id, or null if it couldn't be sent.
+     */
+    fun askAbout(capture: com.pocketai.chat.screen.ScreenCapture?, question: String): String? {
+        newChat()
+        val page = capture?.takeIf { it.text.isNotBlank() }?.let { PageContext(it.label, it.url, it.text, it.kind) }
+        val name = capture?.appName?.let { app ->
+            val q = question.trim().lineSequence().firstOrNull().orEmpty()
+            "$app: " + if (q.length > 40) q.take(38).trimEnd() + "…" else q
+        }
+        return if (send(question, page, name)) state.value.current.id else null
+    }
+
+    /** A follow-up question in the panel's chat. */
+    fun askInChat(chatId: String, question: String): Boolean {
+        if (state.value.current.id != chatId) openChat(chatId)
+        if (state.value.current.id != chatId) return false
+        return send(question)
+    }
+
+    /** A chat by id, whether it's open in the main app or in the list. */
+    fun chat(id: String): Conversation? = convOf(id)
 
     /**
      * Replaces one of your messages with [newText] and answers again from there; everything after it
@@ -776,17 +809,35 @@ class ChatViewModel(private val app: Application) : AndroidViewModel(app) {
                     val shared = StringBuilder()
                     val note = StringBuilder()
                     if (m.pageText != null) {
-                        if (keepMedia) {
-                            shared.append("[The user is sharing a web page]\n")
-                            shared.append("Title: ${m.pageTitle}\nURL: ${m.pageUrl}\n<page_content>\n${m.pageText}\n</page_content>\n\n")
+                        if (keepMedia) when (m.pageSource) {
+                            "screen" -> {
+                                shared.append(
+                                    "[What's on the user's screen right now (${m.pageTitle}" + (m.pageUrl?.let { ", page: $it" } ?: "") +
+                                        "). It was read from the screen, so it also has buttons and menus, and in apps only what " +
+                                        "has loaded; go by the main content. If the question needs more than this (the rest of an " +
+                                        "article, all of a Reddit thread's comments, a video's transcript) and there's a page link, " +
+                                        "call fetch_url on it.]\n<screen>\n${m.pageText}\n</screen>\n\n"
+                                )
+                            }
+                            "selection" -> shared.append("[${m.pageTitle}: text the user selected]\n<selected_text>\n${m.pageText}\n</selected_text>\n\n")
+                            else -> {
+                                shared.append("[The user is sharing a web page]\n")
+                                shared.append("Title: ${m.pageTitle}\nURL: ${m.pageUrl}\n<page_content>\n${m.pageText}\n</page_content>\n\n")
+                            }
                         } else {
-                            note.append("[Earlier the user shared the page \"${m.pageTitle}\" (${m.pageUrl}); its text isn't re-sent.]\n")
+                            note.append("[Earlier the user shared \"${m.pageTitle}\"" + (m.pageUrl?.let { " ($it)" } ?: "") + "; its text isn't re-sent.]\n")
                         }
                     }
                     if (m.images.isNotEmpty() && !keepMedia) {
                         note.append("[The user shared ${m.images.size} photo(s) here earlier; they aren't re-sent.]\n")
                     }
-                    val body = m.text.ifBlank { if (m.images.isNotEmpty()) "(see the attached photo)" else "" }
+                    val body = m.text.ifBlank {
+                        when {
+                            m.images.isNotEmpty() -> "(see the attached photo)"
+                            m.pageSource != null -> "What's this about?"
+                            else -> ""
+                        }
+                    }
                     val text = shared.toString() + note.toString() + body
                     sharedChars += shared.length
                     textChars += note.length + body.length

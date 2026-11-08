@@ -79,6 +79,16 @@ Emulator: any image works again (no native code since 2.2).
   "Show transcript" (`TRANSCRIPT_JS`, polled every 0.6 s, ≤22 s). That's the page's own UI, not an impersonated
   client; written without device access, so verify on the phone. The guide asks for key moments linked as
   `[m:ss](https://youtu.be/ID?t=S)`.
+- `screen/AskService.kt` (2.4) — accessibility service "Ask Pocket AI" with `flagRequestAccessibilityButton`: the
+  floating accessibility button (not the side key: the owner keeps Gemini as the digital assistant for its screen
+  mode). On tap only (events ignored) it reads the active app window's node tree (web content incl. off-screen
+  text, apps only visible nodes, no password/editable fields) and the browser's address bar (`ScreenText.URL_BAR_IDS`;
+  Chrome often shows only the site), caps at 25k chars, stores it in `PocketApp.pendingCapture` and opens
+  `AskActivity`: a translucent bottom-sheet panel over the app (own task, singleTask) that starts a normal chat
+  (`ChatViewModel.askAbout`, message `pageSource = "screen"`) and also handles `PROCESS_TEXT` ("Ask Pocket AI" on
+  selected text, `pageSource = "selection"`). The AI is told screen text includes menus and to `fetch_url` the link
+  for more. Sideloaded apps need App info → ⋮ → Allow restricted settings before the switch can be turned on.
+  Written without a device; verify on the Fold.
 - `data/Rates.kt` — NT Media per-model usage multipliers (from its price list; its API doesn't expose
   them). `ReplyUsage.multiplier`/`billed` = tokens × multiplier, shown in chat, usage dialog/screen, model menu.
 - `data/Settings.kt` — `AppSettings` (saved API profiles, search engine/keys), stored as one AES-GCM

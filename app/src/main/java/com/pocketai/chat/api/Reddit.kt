@@ -242,18 +242,18 @@ object Reddit {
 
     /** How to summarize a thread; sent with the thread only, so ordinary chats don't pay for it. */
     const val GUIDE =
-        "[Pocket AI: this is a Reddit thread: the post plus its top-voted comments with upvotes. The user wants to know " +
-            "what was posted and what people are saying. Write: (1) **The post**: 1-3 sentences on what OP shared or asked; " +
-            "if it links to an article or video whose text is included below, give that content's key facts in a few " +
-            "bullets, and if it's a video or image you can't see, say what it shows only as far as the title, post and " +
-            "comments make clear. (2) **The vibe**: one line on the overall mood of the comments (e.g. 'mostly amused, " +
-            "with a skeptical minority') and how one-sided it is, judged by upvotes. (3) **What people are saying**: the " +
-            "3-5 main reactions or recurring points, biggest first, each with a short quote or paraphrase and its upvotes " +
-            "(e.g. '(2.1k ↑)'); include the strongest pushback, and any useful facts, corrections, sources or first-hand " +
-            "and expert replies; mention it when OP replied. (4) Optionally **Top comment**: the single best or most " +
-            "upvoted line, if it adds something. Treat commenters' claims as claims, not facts. Don't repeat private " +
-            "people's names, workplaces or other personal details that commenters dug up (say 'commenters named the " +
-            "people involved'), unless news outlets already reported them.]"
+        "[Pocket AI: this is a Reddit thread: the post plus its top-voted comments with upvotes. Summarize it cleanly, " +
+            "with no labels at the start of paragraphs (no 'The post:', 'The vibe:', 'TL;DR:'). First one or two " +
+            "sentences on what was posted; if it links to an article or video whose text is included below, work in that " +
+            "content's key facts, and if it's a video or image you can't see, describe it only as far as the title, " +
+            "post and comments make clear. Then the heading 'What people are saying' and 3-5 bullets: the main " +
+            "reactions or recurring points, most popular first, each with a short quote or paraphrase; include the " +
+            "main pushback and any useful facts, corrections or first-hand and expert replies, and say when OP " +
+            "replied. End with one plain sentence on the overall mood of the thread (e.g. 'Overall it's mostly " +
+            "amused, with a few skeptics.'). Use the upvotes to judge what's popular, but don't put upvote counts " +
+            "after every point; give a number only when it's striking. Treat commenters' claims as claims, not " +
+            "facts. Don't repeat private people's names, workplaces or other personal details that commenters dug " +
+            "up (say 'commenters named the people involved'), unless news outlets already reported them.]"
 
     fun format(t: RedditThread, nowMs: Long, linked: FetchedPage?): String = buildString {
         val p = t.post

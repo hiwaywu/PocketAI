@@ -117,7 +117,9 @@ Emulator: any image works again (no native code since 2.2).
   translated (original in brackets only when it matters; never guess name spellings). Without the explicit
   "one-word request" wording, a Chinese article + "Summary" got a Chinese reply 2 of 2 times.
 - Summaries: journalist-style brief (what happened + why it matters, key-detail bullets, what's unclear), not a
-  sentence-by-sentence translation; only the page's main content; no added facts.
+  sentence-by-sentence translation; only the page's main content; no added facts. 2.3: the owner found 2.2's
+  labelled layout ("TL;DR:", "The post:", "The vibe:", upvotes after every point) weird; now plain opening
+  sentences + bullets, no paragraph labels, at most a heading like "What people are saying" / "Key moments".
 - Token policy: don't waste, don't skimp. Chat text is always re-sent in full; raw web results only for the
   latest answer; photos/shared pages only for the last 4 user messages; system prompt has date only so
   provider prompt caching works. Each reply records tokens, steps, searches, pages, seconds.

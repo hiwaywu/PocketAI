@@ -112,6 +112,12 @@ Emulator: any image works again (no native code since 2.2).
   found from its time stamps (`ScreenText.leadingTime` also parses "1 minute, 49 seconds"; skips "2:04 / 21:25" and
   "… ago") via the nearest scrollable ancestor, and scrolled with SCROLL_FORWARD → SCROLL_DOWN → a
   `dispatchGesture` swipe (`canPerformGestures` in ask_service.xml). Never taps "...more" while time lines show.
+  2.11 (device test on 2.10 still read only the first ~54 s): YouTube's transcript opens at the playing position
+  and follows playback, and a scroll action can report success without moving. Now: pause ("Pause video"), sweep UP
+  then DOWN, each way switching action → page → swipe when a way brings no new lines; lines sorted by time;
+  complete = starts ≤0:15 and reaches ≥85% of the player's length (`ScreenText.videoLength`). Incomplete → video
+  link lookup + `youTubePartialNote` (fetch_url the link before answering). `ScreenCapture.debug` ("How it went")
+  is shown under the panel's "What Pocket AI read" preview — ask the owner for a screenshot of it when debugging.
 - `data/Rates.kt` — NT Media per-model usage multipliers (from its price list; its API doesn't expose
   them). `ReplyUsage.multiplier`/`billed` = tokens × multiplier, shown in chat, usage dialog/screen, model menu.
 - `data/Settings.kt` — `AppSettings` (saved API profiles, search engine/keys), stored as one AES-GCM

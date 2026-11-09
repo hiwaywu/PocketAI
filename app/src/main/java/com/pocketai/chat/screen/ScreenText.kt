@@ -69,6 +69,51 @@ object ScreenText {
             "summary, the transcript, details), call fetch_url on that link: it returns the video's details and its " +
             "transcript. Don't search news sites about it instead.]"
 
+    private val AUTHOR = Regex("""^@[\w.\-]{2,}""")
+    private val LIKES_LABEL = Regex("""(?i)like this comment along with ([\d,.]+\s*[kmb]?) other (?:people|person)""")
+    private val REPLIES = Regex("""(?i)^(?:view\s+)?([\d,.]+\s*[kmb]?)\s+repl(?:y|ies)$""")
+    private val COUNT = Regex("""(?i)^[\d,.]+\s*[kmb]?$""")
+    private val COMMENT_UI = setOf(
+        "reply", "like", "dislike", "share", "read more", "show less", "translate to english", "comments", "top",
+        "newest", "sort comments", "add a comment...", "add a comment…", "more actions", "action menu", "replies",
+    )
+
+    /** An "@name" (optionally "· 2 days ago"), which starts a YouTube comment. */
+    fun isCommentAuthor(t: String) = AUTHOR.containsMatchIn(t.trim())
+
+    /**
+     * One YouTube comment row (as read from the app) → "[1.2K likes] the comment (23 replies)", without the author's
+     * name, the time or buttons. Null for rows that aren't comments.
+     */
+    fun formatComment(lines: List<String>): String? {
+        var likes: String? = null
+        var replies: String? = null
+        var hasAuthor = false
+        val words = mutableListOf<String>()
+        for (raw in lines) {
+            val l = raw.trim()
+            if (l.isEmpty()) continue
+            val low = l.lowercase()
+            when {
+                AUTHOR.containsMatchIn(l) -> hasAuthor = true
+                LIKES_LABEL.containsMatchIn(l) -> likes = LIKES_LABEL.find(l)!!.groupValues[1].replace(" ", "")
+                REPLIES.matches(l) -> replies = REPLIES.find(l)!!.groupValues[1].replace(" ", "")
+                low in COMMENT_UI || low.startsWith("pinned by") || low.startsWith("reply to") -> {}
+                COUNT.matches(l) -> if (likes == null) likes = l.replace(" ", "")
+                Regex("""(?i)^\d+\s*(seconds?|minutes?|hours?|days?|weeks?|months?|years?)\s+ago( \(edited\))?$""").matches(l) -> {}
+                else -> if (words.none { it == l }) words += l
+            }
+        }
+        if (!hasAuthor || words.isEmpty()) return null
+        val body = words.joinToString(" / ").replace(Regex("""\s+"""), " ").trim()
+        return "[${likes ?: "0"} likes] $body" + (replies?.let { " ($it replies)" } ?: "")
+    }
+
+    const val YOUTUBE_COMMENTS_NOTE =
+        "[Pocket AI: these are the video's top comments from the YouTube app, most-liked first. When summarizing them, " +
+            "cover what people think, the way you'd tell a friend: the overall mood and the main reactions, including " +
+            "disagreement. Likes show what's popular; no need to quote the numbers. Commenters' claims are claims, not facts.]"
+
     /** When only part of the transcript could be read from the YouTube app. */
     fun youTubePartialNote(link: String?) =
         "[Pocket AI: the transcript below is incomplete; only part of it could be read from the YouTube app. " +

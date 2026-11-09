@@ -131,6 +131,12 @@ Emulator: any image works again (no native code since 2.2).
   `ScreenCapture.debug`; the panel preview has **Copy details** — ask the owner to paste it before changing the
   YouTube automation again. The share path's hidden-WebView transcript now reports why it failed
   (`transcriptProblem`, incl. the page title/URL it landed on) into the tool result.
+  2.14 — real labels from the owner's Fold (screenshot of "What Pocket AI read", app was still on ≤2.10): transcript
+  rows expose one contentDescription "5 minutes, 42 seconds two legs on…"; the player exposes "5 minutes 58 seconds
+  elapsed of 14 minutes 36 seconds", "5:58", "/ 14:36", "5 minutes 58 seconds of 14 minutes 36 seconds", then a
+  "Transcript" header. The player labels were parsed as transcript times; `leadingTime` now rejects "elapsed…"/"of…"/
+  "/…", and `transcriptList` takes the smallest ancestor of the first row holding ≥3 transcript segments (not the
+  nearest scrollable, which could be the whole page). Test `youTubeLabelsFromTheFold` uses these strings.
 - `data/Rates.kt` — NT Media per-model usage multipliers (from its price list; its API doesn't expose
   them). `ReplyUsage.multiplier`/`billed` = tokens × multiplier, shown in chat, usage dialog/screen, model menu.
 - `data/Settings.kt` — `AppSettings` (saved API profiles, search engine/keys), stored as one AES-GCM

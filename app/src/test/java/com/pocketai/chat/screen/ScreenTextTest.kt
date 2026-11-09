@@ -121,4 +121,23 @@ class ScreenTextTest {
         assertTrue(ScreenText.isCommentAuthor("@kellyfan88 · 2 days ago"))
         assertFalse(ScreenText.isCommentAuthor("八八卦卦"))
     }
+
+    @Test fun youTubeLabelsFromTheFold() {
+        // Exactly what the YouTube app exposed on the owner's Fold (Nov 2026).
+        val screen = listOf(
+            "5 minutes 58 seconds elapsed of 14 minutes 36 seconds", "5:58", "/ 14:36",
+            "5 minutes 58 seconds of 14 minutes 36 seconds", "Transcript",
+            "5 minutes, 42 seconds two legs on this side of his body. I'm not sure how he lost two of his legs",
+            "5 minutes, 51 seconds to rest after the pinch test.",
+            "6 minutes, 7 seconds All right, could you help me outside?",
+        )
+        assertNull(ScreenText.leadingTime(screen[0]))
+        assertNull(ScreenText.leadingTime(screen[3]))
+        assertEquals(
+            listOf("5:42", "5:51", "6:07"),
+            ScreenText.transcriptSegments(screen).map { it.first },
+        )
+        assertEquals("two legs on this side of his body. I'm not sure how he lost two of his legs", ScreenText.transcriptSegments(screen)[0].second)
+        assertEquals(14 * 60 + 36, ScreenText.videoLength(screen))
+    }
 }

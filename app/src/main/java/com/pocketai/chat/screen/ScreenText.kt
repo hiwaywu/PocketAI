@@ -194,7 +194,9 @@ object ScreenText {
                 clock to t.substring(m.range.last + 1).trim().trimStart(',', ' ')
             }
         }
-        if (rest.startsWith("/") || rest.startsWith("ago", ignoreCase = true)) return null
+        // Not the player's clock ("2:04 / 21:25", "5 minutes 58 seconds elapsed of 14 minutes…") or "2 hours ago".
+        val r = rest.lowercase()
+        if (r.startsWith("/") || r.startsWith("ago") || r.startsWith("elapsed") || r == "of" || r.startsWith("of ")) return null
         return time to rest
     }
 
@@ -208,6 +210,11 @@ object ScreenText {
         for (raw in lines) {
             val l = raw.trim()
             if (l.isEmpty()) continue
+            // The player's "5:58" then "/ 14:36" isn't a transcript line.
+            if (l.startsWith("/")) {
+                pending = null
+                continue
+            }
             val lt = leadingTime(l)
             when {
                 lt != null && lt.second.isEmpty() -> pending = lt.first

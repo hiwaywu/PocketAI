@@ -294,6 +294,10 @@ fun AskPanel(
                         Spacer(Modifier.size(8.dp))
                     }
                     SelectionContainer { Text(capture.text, style = MaterialTheme.typography.bodySmall) }
+                    capture.debug?.let {
+                        Spacer(Modifier.size(10.dp))
+                        Text("How it went: $it", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline)
+                    }
                 }
             },
             confirmButton = { TextButton(onClick = { preview = false }) { Text("OK") } },

@@ -88,7 +88,10 @@ class AskService : AccessibilityService() {
             bar = runCatching { root.findAccessibilityNodeInfosByViewId(id) }.getOrNull()?.firstOrNull()?.text?.toString()
             if (bar != null) break
         }
-        val transcript = if (pkg == ScreenText.YOUTUBE) runCatching { youTubeTranscript(root) }.getOrNull() else null
+        val yt = if (pkg == ScreenText.YOUTUBE) {
+            runCatching { youTubeTranscript(root) }.getOrElse { YtResult(null, false, "error: ${it.message}") }
+        } else null
+        val transcript = yt?.text
         val w = Walk(browser)
         walk(root, w, false, 0)
         // Newer Firefox draws its address bar without a fixed id: fall back to text shaped like a web address in
@@ -96,9 +99,9 @@ class AskService : AccessibilityService() {
         if (bar.isNullOrBlank() && browser) bar = w.addressBars.firstOrNull() ?: w.addresses.firstOrNull()
         var (url, site) = ScreenText.linkFromBar(bar)
         val screenText = ScreenText.clean(w.pieces)
-        // No transcript from the app: find the video on YouTube by the title on screen, so the AI gets its exact
-        // link (and reads that video's transcript) instead of searching news sites about it.
-        val videoLink = if (pkg == ScreenText.YOUTUBE && transcript == null) {
+        // No (complete) transcript from the app: find the video on YouTube by the title on screen, so the AI gets its
+        // exact link (and reads that video's whole transcript) instead of searching news sites about it.
+        val videoLink = if (pkg == ScreenText.YOUTUBE && (transcript == null || yt?.complete != true)) {
             val titles = ScreenText.titleCandidates(w.pieces)
             if (titles.isEmpty()) null else {
                 toast("Finding the video…")
@@ -122,30 +125,39 @@ class AskService : AccessibilityService() {
             text = transcript?.let {
                 "Transcript (read from the YouTube app's transcript panel; [m:ss] = time in the video):\n$it\n\nRest of the screen:\n$screenText"
             } ?: screenText,
-            note = if (pkg == ScreenText.YOUTUBE && transcript == null) {
-                if (videoLink != null) ScreenText.youTubeLinkNote(videoLink) else ScreenText.YOUTUBE_NOTE
-            } else null,
+            note = when {
+                pkg != ScreenText.YOUTUBE || (transcript != null && yt?.complete == true) -> null
+                transcript != null -> ScreenText.youTubePartialNote(videoLink)
+                videoLink != null -> ScreenText.youTubeLinkNote(videoLink)
+                else -> ScreenText.YOUTUBE_NOTE
+            },
+            debug = yt?.log,
         )
     }
 
+    /** What reading the YouTube app's transcript gave: the text, whether it covers the whole video, and a report. */
+    private class YtResult(val text: String?, val complete: Boolean, val log: String)
+
     /**
-     * The YouTube app's own transcript: if its "Show transcript" button is on screen it's tapped; then the
-     * transcript panel is scrolled through (you see it scroll) and every line is collected. Null when there's no
-     * transcript panel or button on screen.
+     * The YouTube app's own transcript. Opens it if needed ("...more" → "Show transcript"), pauses the video (the
+     * panel otherwise keeps jumping to the playing line), scrolls up to the start, then down to the end, collecting
+     * every line. The report says how far it got; it's shown under "What Pocket AI read".
      */
-    private fun youTubeTranscript(start: AccessibilityNodeInfo): String? {
+    private fun youTubeTranscript(start: AccessibilityNodeInfo): YtResult {
+        val log = StringBuilder()
         var root = start
+        val length = ScreenText.videoLength(texts(root))
         var list = transcriptList(root)
         if (list == null) {
             var button = findLabel(root, "show transcript")
-            // A transcript is showing but its list couldn't be found: read what's there, don't tap anything.
-            if (button == null && timeLines(root, 3).size >= 3) return null
+            if (button == null && timeLines(root, 3).size >= 3) return YtResult(null, false, "transcript lines on screen, but not their list")
             if (button == null) {
                 // On the video page: open the description (the title's "...more"), where "Show transcript" lives,
                 // scrolling down to it if needed.
-                val more = findText(root) { ScreenText.isMoreLink(it) } ?: return null
+                val more = findText(root) { ScreenText.isMoreLink(it) }
+                    ?: return YtResult(null, false, "no transcript open and no \"...more\" found")
                 toast("Opening the transcript…")
-                if (!click(more)) return null
+                if (!click(more)) return YtResult(null, false, "couldn't tap \"...more\"")
                 for (i in 0 until 12) {
                     Thread.sleep(250)
                     root = currentRoot() ?: root
@@ -155,39 +167,116 @@ class AskService : AccessibilityService() {
                 for (i in 0 until 8) {
                     if (button != null) break
                     val panel = descriptionList(root) ?: break
-                    if (!scrollDown(panel)) break
+                    if (!scroll(panel, Dir.DOWN)) break
                     Thread.sleep(350)
                     root = currentRoot() ?: root
                     button = findLabel(root, "show transcript")
                 }
-                button ?: return null
+                button ?: return YtResult(null, false, "opened the description but found no \"Show transcript\"")
+                log.append("opened the description; ")
             }
-            if (!click(button)) return null
+            if (!click(button)) return YtResult(null, false, log.append("couldn't tap \"Show transcript\"").toString())
             for (i in 0 until 16) {
                 Thread.sleep(250)
                 root = currentRoot() ?: root
                 list = transcriptList(root)
                 if (list != null) break
             }
-            list ?: return null
+            list ?: return YtResult(null, false, log.append("the transcript didn't appear").toString())
+            log.append("opened the transcript; ")
         }
+        if (pauseVideo(root)) log.append("paused the video; ")
+        log.append("list ${list.className?.toString()?.substringAfterLast('.')}${if (list.isScrollable) " (scrolls)" else ""}; ")
         toast("Reading the transcript…")
-        val segments = LinkedHashMap<String, String>()
-        var unchanged = 0
-        for (i in 0 until 150) {
-            list!!.refresh()
-            val lines = texts(list)
+
+        val segments = LinkedHashMap<String, Pair<Int, String>>()
+        val target = list
+        fun collect(): Int {
+            target.refresh()
             val before = segments.size
-            ScreenText.transcriptSegments(lines).forEach { (t, w) -> segments.putIfAbsent("$t|$w", "$t $w") }
-            unchanged = if (segments.size == before) unchanged + 1 else 0
-            if (unchanged >= 2) break
-            if (!scrollDown(list)) {
-                if (i > 0) break
+            ScreenText.transcriptSegments(texts(target)).forEach { (t, words) ->
+                segments.putIfAbsent("$t|$words", com.pocketai.chat.api.Transcript.seconds(t) to "$t $words")
             }
-            Thread.sleep(400)
+            return segments.size - before
         }
-        if (segments.size < 3) return null
-        return com.pocketai.chat.api.Transcript.format(segments.values.toList(), 12_000)
+        collect()
+        val firstScreen = segments.size
+        val up = sweep(target, Dir.UP, ::collect)
+        val down = sweep(target, Dir.DOWN, ::collect)
+        log.append("first screen $firstScreen lines; up: $up; down: $down; ")
+        if (segments.size < 3) return YtResult(null, false, log.append("too few lines").toString())
+        val lines = segments.values.sortedBy { it.first }
+        val first = lines.first().first
+        val last = lines.last().first
+        // Complete when it starts near 0:00 and reaches (near) the end; if the length isn't on screen, when
+        // scrolling down worked.
+        val complete = first <= 15 && (if (length != null) last >= length * 0.85 - 20 else down.contains("moved"))
+        log.append("${lines.size} lines, ${lines.first().second.substringBefore(' ')}–${lines.last().second.substringBefore(' ')}")
+        length?.let { log.append(" of ${it / 60}:${(it % 60).toString().padStart(2, '0')}") }
+        log.append(if (complete) " (complete)" else " (incomplete)")
+        val text = com.pocketai.chat.api.Transcript.format(lines.map { it.second }, 12_000)
+        return YtResult(text, complete, log.toString())
+    }
+
+    private enum class Dir { UP, DOWN }
+
+    /**
+     * Scrolls the list one way until nothing new appears, trying each way of scrolling in turn: a list's own scroll
+     * action can report success without moving, so a way that brings no new lines is swapped for the next one.
+     * Returns a short report, e.g. "swipe moved ×12".
+     */
+    private fun sweep(list: AccessibilityNodeInfo, dir: Dir, collect: () -> Int): String {
+        val ways = listOf("action", "page", "swipe")
+        var way = 0
+        var moved = 0
+        var stuck = 0
+        val worked = mutableSetOf<Int>()
+        var steps = 0
+        while (way < ways.size && steps++ < 120) {
+            if (!scrollWay(list, dir, ways[way])) {
+                way++
+                continue
+            }
+            Thread.sleep(if (ways[way] == "swipe") 450 else 400)
+            if (collect() > 0) {
+                worked += way
+                moved++
+                stuck = 0
+            } else if (way !in worked) {
+                way++ // this way didn't move the list: try the next
+            } else if (++stuck >= 2) {
+                break // it moved before and now shows nothing new: the start/end
+            }
+        }
+        return if (moved == 0) "didn't move" else "${worked.joinToString("+") { ways[it] }} moved ×$moved"
+    }
+
+    private fun scroll(list: AccessibilityNodeInfo, dir: Dir): Boolean =
+        scrollWay(list, dir, "action") || scrollWay(list, dir, "page") || scrollWay(list, dir, "swipe")
+
+    private fun scrollWay(list: AccessibilityNodeInfo, dir: Dir, way: String): Boolean = when (way) {
+        "action" -> list.performAction(
+            if (dir == Dir.DOWN) AccessibilityNodeInfo.ACTION_SCROLL_FORWARD else AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD
+        )
+        "page" -> list.performAction(
+            (if (dir == Dir.DOWN) AccessibilityNodeInfo.AccessibilityAction.ACTION_SCROLL_DOWN
+            else AccessibilityNodeInfo.AccessibilityAction.ACTION_SCROLL_UP).id
+        )
+        else -> swipe(list, dir)
+    }
+
+    /** Pauses the playing video (its "Pause video" button), so the transcript stops jumping to the playing line. */
+    private fun pauseVideo(root: AccessibilityNodeInfo): Boolean {
+        val stack = ArrayDeque<AccessibilityNodeInfo>().apply { add(root) }
+        var seen = 0
+        while (stack.isNotEmpty() && seen < 3_000) {
+            val n = stack.removeLast()
+            seen++
+            val t = (n.contentDescription ?: n.text)?.toString()?.trim()?.lowercase()
+            if (t == "pause video" || t == "pause") return click(n).also { if (it) Thread.sleep(300) }
+            for (i in 0 until n.childCount) runCatching { n.getChild(i) }.getOrNull()?.let { stack.add(it) }
+        }
+        return false
     }
 
     private fun currentRoot(): AccessibilityNodeInfo? = appWindow()?.root ?: rootInActiveWindow
@@ -256,31 +345,34 @@ class AskService : AccessibilityService() {
         return generateSequence(hits[0].parent) { it.parent }.take(12).firstOrNull { holdsTimes(it) }
     }
 
-    /**
-     * Scrolls a list down by most of its height: the list's own scroll action if it has one, else a finger-like
-     * swipe on it (YouTube's lists don't always take the scroll command).
-     */
-    private fun scrollDown(list: AccessibilityNodeInfo): Boolean {
-        if (list.performAction(AccessibilityNodeInfo.ACTION_SCROLL_FORWARD)) return true
-        if (list.performAction(AccessibilityNodeInfo.AccessibilityAction.ACTION_SCROLL_DOWN.id)) return true
-        return swipeUp(list)
-    }
-
-    private fun swipeUp(node: AccessibilityNodeInfo): Boolean {
+    /** A finger-like swipe on [node] that scrolls it one way by most of its height. */
+    private fun swipe(node: AccessibilityNodeInfo, dir: Dir): Boolean {
         val r = Rect()
         node.getBoundsInScreen(r)
         if (r.height() < 200 || r.width() < 100) return false
         val x = r.exactCenterX()
+        val low = r.bottom - r.height() * 0.15f
+        val high = r.top + r.height() * 0.2f
         val path = Path().apply {
-            moveTo(x, r.bottom - r.height() * 0.15f)
-            lineTo(x, r.top + r.height() * 0.2f)
+            if (dir == Dir.DOWN) {
+                moveTo(x, low)
+                lineTo(x, high)
+            } else {
+                moveTo(x, high)
+                lineTo(x, low)
+            }
         }
         val gesture = GestureDescription.Builder().addStroke(GestureDescription.StrokeDescription(path, 0, 350)).build()
         val done = CountDownLatch(1)
         var ok = false
         val sent = dispatchGesture(gesture, object : GestureResultCallback() {
-            override fun onCompleted(gestureDescription: GestureDescription?) { ok = true; done.countDown() }
-            override fun onCancelled(gestureDescription: GestureDescription?) { done.countDown() }
+            override fun onCompleted(gestureDescription: GestureDescription?) {
+                ok = true
+                done.countDown()
+            }
+            override fun onCancelled(gestureDescription: GestureDescription?) {
+                done.countDown()
+            }
         }, null)
         if (!sent) return false
         done.await(2, TimeUnit.SECONDS)

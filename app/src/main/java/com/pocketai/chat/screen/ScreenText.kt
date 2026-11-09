@@ -18,6 +18,8 @@ data class ScreenCapture(
     val text: String,
     /** A note for the AI only (e.g. how to find a YouTube video's transcript); not shown in the "what it read" preview. */
     val note: String? = null,
+    /** How reading went (e.g. how far the YouTube transcript got), shown small under the preview to help fix problems. */
+    val debug: String? = null,
 ) {
     /** Short label for the chip on the message, e.g. "Firefox screen · nytimes.com". */
     val label: String
@@ -66,6 +68,28 @@ object ScreenText {
         "[Pocket AI: this is the YouTube app; the video on screen is $link. If the user asks what the video says (a " +
             "summary, the transcript, details), call fetch_url on that link: it returns the video's details and its " +
             "transcript. Don't search news sites about it instead.]"
+
+    /** When only part of the transcript could be read from the YouTube app. */
+    fun youTubePartialNote(link: String?) =
+        "[Pocket AI: the transcript below is incomplete; only part of it could be read from the YouTube app. " +
+            (if (link != null) "Before answering, call fetch_url on $link to get the whole transcript. "
+            else "Before answering, get the whole transcript: call fetch_url on https://www.youtube.com/results?search_query= " +
+                "followed by the video's title from the screen, then on the matching video's link. ") +
+            "Don't search news sites to fill the gaps.]"
+
+    private val CLOCK = Regex("""((?:\d{1,2}:)?\d{1,2}:\d{2})\s*/\s*((?:\d{1,2}:)?\d{1,2}:\d{2})""")
+    private val SPOKEN_LENGTH = Regex("""(?i)\bof\s+((?:\d+\s*hours?,?\s*)?(?:\d+\s*minutes?,?\s*)?(?:\d+\s*seconds?)?)""")
+
+    /** The video's length in seconds, from the player's "2:04 / 21:25" (or "… of 21 minutes, 25 seconds"), if shown. */
+    fun videoLength(pieces: List<String>): Int? {
+        for (p in pieces) {
+            CLOCK.find(p)?.let { return com.pocketai.chat.api.Transcript.seconds(it.groupValues[2]) }
+            SPOKEN_LENGTH.find(p)?.groupValues?.get(1)?.takeIf { it.isNotBlank() }?.let { spoken ->
+                leadingTime(spoken)?.first?.let { return com.pocketai.chat.api.Transcript.seconds(it) }
+            }
+        }
+        return null
+    }
 
     /** YouTube's "...more" under the title (opens the description) and similar labels. */
     fun isMoreLink(t: String): Boolean {

@@ -101,4 +101,11 @@ class ScreenTextTest {
         )
         assertEquals(listOf("1:49" to "就全林場度一時又話", "1:49" to "就全林場度一時又話", "1:56" to "儀出面開佢"), rows)
     }
+
+    @Test fun videoLengthFromPlayer() {
+        assertEquals(21 * 60 + 25, ScreenText.videoLength(listOf("Pause video", "2:04 / 21:25")))
+        assertEquals(144, ScreenText.videoLength(listOf("0 minutes 54 seconds of 2 minutes 24 seconds")))
+        assertEquals(3723, ScreenText.videoLength(listOf("10:00 / 1:02:03")))
+        assertNull(ScreenText.videoLength(listOf("Reply", "1:49")))
+    }
 }

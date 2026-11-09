@@ -140,4 +140,14 @@ class ScreenTextTest {
         assertEquals("two legs on this side of his body. I'm not sure how he lost two of his legs", ScreenText.transcriptSegments(screen)[0].second)
         assertEquals(14 * 60 + 36, ScreenText.videoLength(screen))
     }
+
+    @Test fun redditAppTitle() {
+        // What the Reddit app showed in the owner's screenshot.
+        val screen = listOf(
+            "r/NowInTech", "u/skaza02 • 11h • thenextweb.com", "Top 1% Poster",
+            "Anthropic buys \$3.4bn of gas generators for its data centres, FT reports", "91", "36", "Join",
+            "the8bit 9h", "Oh cool so joining Elon's \" I don't care about the environment, I just need to power these data centers to make a profit!\"",
+        )
+        assertEquals("Anthropic buys \$3.4bn of gas generators for its data centres, FT reports", ScreenText.redditTitleCandidates(screen).first())
+    }
 }

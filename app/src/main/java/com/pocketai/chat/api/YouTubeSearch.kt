@@ -83,38 +83,12 @@ object YouTubeSearch {
                     "\n   ${v.link}"
             }.joinToString("\n")
 
-    private fun norm(s: String) = s.lowercase().filter { it.isLetterOrDigit() }
-
     /**
      * The search result that is the video whose title (or a chapter title, which YouTube shows over the player)
-     * was read from the screen: the two share a long enough stretch of text (Chinese characters count 2.5×).
+     * was read from the screen.
      */
-    fun bestMatch(screenTitle: String, videos: List<Video>): Video? {
-        val c = norm(screenTitle)
-        if (PageText.weight(c) < 12) return null
-        return videos.take(6).firstOrNull { v ->
-            val t = norm(v.title)
-            val shorter = if (t.length < c.length) t else c
-            t.isNotEmpty() && PageText.weight(commonRun(c, t)) >= minOf(15.0, PageText.weight(shorter) * 0.8)
-        }
-    }
-
-    /** The longest stretch of text two strings share. */
-    private fun commonRun(a: String, b: String): String {
-        var best = 0
-        var end = 0
-        val prev = IntArray(b.length + 1)
-        for (i in 1..a.length) {
-            var diag = 0
-            for (j in 1..b.length) {
-                val up = prev[j]
-                prev[j] = if (a[i - 1] == b[j - 1]) diag + 1 else 0
-                if (prev[j] > best) { best = prev[j]; end = i }
-                diag = up
-            }
-        }
-        return a.substring(end - best, end)
-    }
+    fun bestMatch(screenTitle: String, videos: List<Video>): Video? =
+        videos.take(6).firstOrNull { PageText.sameTitle(screenTitle, it.title) }
 
     /** Finds `marker = {...}` in a page and returns the balanced JSON object text. */
     fun jsonAfter(html: String, marker: String): String? {

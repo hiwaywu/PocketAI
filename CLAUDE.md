@@ -137,6 +137,12 @@ Emulator: any image works again (no native code since 2.2).
   "Transcript" header. The player labels were parsed as transcript times; `leadingTime` now rejects "elapsed…"/"of…"/
   "/…", and `transcriptList` takes the smallest ancestor of the first row holding ≥3 transcript segments (not the
   nearest scrollable, which could be the whole page). Test `youTubeLabelsFromTheFold` uses these strings.
+  2.15 (device test: Reddit app → "Looking at Reddit" but 0 text): `pickWindow()` walks every app window (not ours)
+  and reads the active one unless another has ≥2× its text (or it has <50 chars); later steps reuse that window id.
+  The report (`report()`, now for every app, with text per window) backs "Details"/"Copy details". Reddit app
+  (`ScreenText.REDDIT_APP`): `redditTitleCandidates` + the "r/sub" line → `WebTools.findRedditThread` (Reddit
+  search.json in the subreddit, then site-wide; `PageText.sameTitle` = longest shared run) → `fetch(link)` like a
+  shared link; the capture text is that thread (with `Reddit.GUIDE`) plus the screen.
 - `data/Rates.kt` — NT Media per-model usage multipliers (from its price list; its API doesn't expose
   them). `ReplyUsage.multiplier`/`billed` = tokens × multiplier, shown in chat, usage dialog/screen, model menu.
 - `data/Settings.kt` — `AppSettings` (saved API profiles, search engine/keys), stored as one AES-GCM

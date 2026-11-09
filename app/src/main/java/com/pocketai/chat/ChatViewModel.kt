@@ -379,6 +379,16 @@ class ChatViewModel(private val app: Application) : AndroidViewModel(app) {
     /** For the Pocket AI button in the YouTube app: finds the video on YouTube by the title read from the screen. */
     suspend fun findYouTubeVideo(titles: List<String>): String? = web.findYouTubeVideo(titles)
 
+    /**
+     * For the Pocket AI button in the Reddit app: finds the thread on reddit.com by the title on screen and reads
+     * it like a shared link (post, linked article, top comments). Null if it can't be found.
+     */
+    suspend fun readRedditThread(subreddit: String?, titles: List<String>): com.pocketai.chat.api.FetchedPage? {
+        val link = web.findRedditThread(subreddit, titles) ?: return null
+        val s = state.value.settings
+        return web.fetch(link, s.deepSeekKey.takeIf { s.searchEngine == SearchEngine.DEEPSEEK })
+    }
+
     /** A chat by id, whether it's open in the main app or in the list. */
     fun chat(id: String): Conversation? = convOf(id)
 

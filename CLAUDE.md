@@ -150,6 +150,9 @@ Emulator: any image works again (no native code since 2.2).
   `screen/ButtonTile.kt` (StatusBarManager.requestAddTileService on API 33+). The service keeps
   `flagRequestAccessibilityButton` (it's what keeps the service enabled), so the system button stays unless the owner
   switches its Location to "Swipe up with 2 fingers" (tip in Settings).
+  2.17: "hide" means tuck into the side, not remove: hold → slides ~64% past the nearest edge (tab, alpha 0.6,
+  `ui` pref floatingButtonTucked, kept across apps); tap the tab → slides back; drag → untucks and snaps; hold the
+  tab → the hide menu (1 hour / until turned back on).
 - `data/Rates.kt` — NT Media per-model usage multipliers (from its price list; its API doesn't expose
   them). `ReplyUsage.multiplier`/`billed` = tokens × multiplier, shown in chat, usage dialog/screen, model menu.
 - `data/Settings.kt` — `AppSettings` (saved API profiles, search engine/keys), stored as one AES-GCM

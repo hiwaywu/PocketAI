@@ -68,19 +68,19 @@ class WebTools(private val http: OkHttpClient, private val appContext: Context) 
 document.querySelectorAll('video').forEach(function(v){try{v.muted=true;v.pause();}catch(e){}});
 var segs=document.querySelectorAll('ytd-transcript-segment-renderer,ytm-transcript-segment-renderer,transcript-segment-view-model');
 if(segs.length>2){var out=[];segs.forEach(function(s){out.push((s.innerText||s.textContent||'').replace(/\s+/g,' ').trim());});
-return JSON.stringify({s:'done',lines:out});}
+return JSON.stringify({u:location.href.slice(0,90),t:(document.title||'').slice(0,60),s:'done',lines:out});}
 var panel=document.querySelector('[target-id="engagement-panel-searchable-transcript"] #segments-container,ytd-transcript-renderer,ytm-transcript-renderer');
-if(panel&&/\d:\d\d/.test(panel.innerText||''))return JSON.stringify({s:'done',text:panel.innerText});
+if(panel&&/\d:\d\d/.test(panel.innerText||''))return JSON.stringify({u:location.href.slice(0,90),t:(document.title||'').slice(0,60),s:'done',text:panel.innerText});
 var btn=document.querySelector('ytd-video-description-transcript-section-renderer button,ytm-video-description-transcript-section-renderer button');
 if(!btn){var c=document.querySelectorAll('button,[role="button"],tp-yt-paper-item');
 for(var i=0;i<c.length;i++){var t=((c[i].getAttribute('aria-label')||'')+' '+(c[i].innerText||'')).toLowerCase();
 if(t.indexOf('show transcript')>=0){btn=c[i];break;}}}
-if(btn){if(!window.__paT||Date.now()-window.__paT>4000){window.__paT=Date.now();btn.click();}return JSON.stringify({s:'clicked'});}
+if(btn){if(!window.__paT||Date.now()-window.__paT>4000){window.__paT=Date.now();btn.click();}return JSON.stringify({u:location.href.slice(0,90),t:(document.title||'').slice(0,60),s:'clicked'});}
 var more=document.querySelector('#description-inline-expander #expand,ytd-text-inline-expander #expand');
-if(more&&!window.__paM){window.__paM=1;more.click();return JSON.stringify({s:'expanded'});}
+if(more&&!window.__paM){window.__paM=1;more.click();return JSON.stringify({u:location.href.slice(0,90),t:(document.title||'').slice(0,60),s:'expanded'});}
 var ready=!!document.querySelector('ytd-watch-metadata #title,ytd-watch-flexy #description');
-return JSON.stringify({s:ready?'nobutton':'loading'});
-}catch(e){return JSON.stringify({s:'error',e:String(e)});}})()"""
+return JSON.stringify({u:location.href.slice(0,90),t:(document.title||'').slice(0,60),s:ready?'nobutton':'loading'});
+}catch(e){return JSON.stringify({u:location.href.slice(0,90),t:(document.title||'').slice(0,60),s:'error',e:String(e)});}})()"""
 
         val TOOL_DEFS: JsonArray = buildJsonArray {
             addJsonObject {
@@ -402,8 +402,9 @@ return JSON.stringify({s:ready?'nobutton':'loading'});
             append("\nDescription:\n${info.description.take(3000)}\n\n")
             if (!transcript.isNullOrBlank()) append("Transcript ([m:ss] = time in the video):\n$transcript")
             else append(
-                "(No transcript could be read for this video. Summarize from the title, description and chapters, and " +
-                    "say in one short line at the end that the transcript wasn't available.)"
+                "(No transcript could be read for this video (${transcriptProblem ?: "YouTube refused the captions"}). " +
+                    "Summarize from the title, description and chapters, and " +
+                    "say in one short line at the end that the transcript wasn't available, with the reason in brackets.)"
             )
         }
         return FetchedPage(info.title, original, text)
@@ -482,7 +483,11 @@ return JSON.stringify({s:ready?'nobutton':'loading'});
      * same thing a person does in a browser, then reads the transcript panel. Null if there's none.
      */
     @SuppressLint("SetJavaScriptEnabled")
+    /** Why the last transcript attempt failed (shown to the AI, which passes it on), e.g. "the page has no transcript button". */
+    @Volatile private var transcriptProblem: String? = null
+
     private suspend fun transcriptFromPage(id: String): List<String>? = withContext(Dispatchers.Main) {
+        transcriptProblem = "timed out loading YouTube's page"
         withTimeoutOrNull(22_000) {
             suspendCancellableCoroutine { cont ->
                 val main = Handler(Looper.getMainLooper())
@@ -513,6 +518,13 @@ return JSON.stringify({s:ready?'nobutton':'loading'});
                         val state = o?.str("s")
                         val lines = (o?.get("lines") as? JsonArray)?.mapNotNull { (it as? kotlinx.serialization.json.JsonPrimitive)?.content }
                             ?: o?.str("text")?.let { splitPanel(it) }
+                        transcriptProblem = when (state) {
+                            "nobutton" -> "the page has no Show transcript button"
+                            "clicked" -> "tapped Show transcript but no lines appeared"
+                            "expanded" -> "opened the description but found no Show transcript button"
+                            "error" -> "page script error: ${o?.str("e")}"
+                            else -> "the video page didn't finish loading"
+                        } + " (page: ${o?.str("t") ?: "?"} · ${o?.str("u") ?: "?"})"
                         when {
                             state == "done" && !lines.isNullOrEmpty() -> finish(lines)
                             state == "nobutton" && ++noButton >= 8 -> finish(null) // this video has no transcript

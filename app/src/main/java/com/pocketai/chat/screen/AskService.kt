@@ -71,16 +71,23 @@ class AskService : AccessibilityService() {
     private fun toast(text: String) = Handler(Looper.getMainLooper()).post { Toast.makeText(this, text, Toast.LENGTH_SHORT).show() }
 
     /** The app window the user is looking at (on the unfolded Fold with two apps open, the one last touched). */
+    /**
+     * The app window the user is looking at (on the unfolded Fold with two apps open, the one last touched).
+     * Pocket AI's own panel is skipped: tapping the button while a panel is still open read the panel itself.
+     */
     private fun appWindow(): AccessibilityWindowInfo? {
-        val apps = runCatching { windows }.getOrNull().orEmpty().filter { it.type == AccessibilityWindowInfo.TYPE_APPLICATION }
+        val apps = runCatching { windows }.getOrNull().orEmpty()
+            .filter { it.type == AccessibilityWindowInfo.TYPE_APPLICATION && it.root?.packageName?.toString() != packageName }
         return apps.firstOrNull { it.isActive } ?: apps.firstOrNull { it.isFocused } ?: apps.firstOrNull()
     }
 
     private fun readScreen(): ScreenCapture? {
+        swipes = 0
+        swipesDone = 0
         val win = appWindow()
-        val root = win?.root ?: rootInActiveWindow ?: return null
+        val root = win?.root ?: rootInActiveWindow?.takeIf { it.packageName?.toString() != packageName }
+            ?: return ScreenCapture("screen", "this app", text = "", debug = "no app window to read\n" + windowsLine())
         val pkg = root.packageName?.toString()
-        if (pkg == packageName) return null
         val browser = pkg in ScreenText.BROWSERS
         var bar: String? = null
         for (id in ScreenText.URL_BAR_IDS) {
@@ -131,14 +138,107 @@ class AskService : AccessibilityService() {
             } ?: screenText,
             note = when {
                 comments != null -> ScreenText.YOUTUBE_COMMENTS_NOTE
+                pkg == ScreenText.YOUTUBE && commentsOpen(root) -> ScreenText.YOUTUBE_COMMENTS_HIDDEN_NOTE
                 pkg != ScreenText.YOUTUBE || (transcript != null && yt?.complete == true) -> null
                 transcript != null -> ScreenText.youTubePartialNote(videoLink)
                 videoLink != null -> ScreenText.youTubeLinkNote(videoLink)
                 else -> ScreenText.YOUTUBE_NOTE
             },
-            debug = comments?.log ?: yt?.log,
+            debug = listOfNotNull(comments?.log ?: yt?.log, if (pkg == ScreenText.YOUTUBE) runCatching { report(root, win) }.getOrNull() else null)
+                .joinToString("\n").ifBlank { null },
         )
     }
+
+    /** Swipes tried during this tap and how many the system accepted/finished (for the report). */
+    private var swipes = 0
+    private var swipesDone = 0
+
+    /**
+     * A technical report of the screen for fixing problems remotely: the windows, and around the transcript time
+     * stamps / comment authors, how YouTube's list is built (classes, flags S=scrolls C=tappable h=hidden, scroll
+     * actions) with short text samples. Shown and copyable under the panel's "What Pocket AI read".
+     */
+    private fun report(root: AccessibilityNodeInfo, chosen: AccessibilityWindowInfo?): String {
+        val sb = StringBuilder()
+        val wins = runCatching { windows }.getOrNull().orEmpty()
+        sb.append("windows: ").append(wins.joinToString("; ") { w ->
+            "${winType(w.type)} ${w.root?.packageName ?: "?"}${if (w.isActive) " active" else ""}${if (w.isFocused) " focused" else ""}${if (w == chosen) " ←read" else ""}"
+        }).append('\n')
+        sb.append("swipes: $swipes sent, $swipesDone finished\n")
+        val time = timeLines(root, 1).firstOrNull()
+        val author = findText(root) { ScreenText.isCommentAuthor(it) }
+        for ((name, hit) in listOf("first time stamp" to time, "first comment author" to author)) {
+            hit ?: continue
+            sb.append("$name ancestors:\n")
+            var n: AccessibilityNodeInfo? = hit
+            var i = 0
+            while (n != null && i++ < 14) {
+                sb.append("  ").append(describe(n)).append('\n')
+                n = n.parent
+            }
+            hit.parent?.parent?.let { row ->
+                sb.append("$name row:\n")
+                dumpTree(row, sb, 1, intArrayOf(0), 25)
+            }
+        }
+        if (time == null && author == null) {
+            sb.append("screen:\n")
+            dumpTree(root, sb, 1, intArrayOf(0), 60)
+        }
+        return sb.toString().take(7_000)
+    }
+
+    private fun winType(t: Int) = when (t) {
+        AccessibilityWindowInfo.TYPE_APPLICATION -> "app"
+        AccessibilityWindowInfo.TYPE_SYSTEM -> "system"
+        AccessibilityWindowInfo.TYPE_INPUT_METHOD -> "keyboard"
+        AccessibilityWindowInfo.TYPE_ACCESSIBILITY_OVERLAY -> "a11y"
+        else -> "type$t"
+    }
+
+    private fun describe(n: AccessibilityNodeInfo): String {
+        val cls = n.className?.toString()?.substringAfterLast('.') ?: "?"
+        val flags = buildString {
+            if (n.isScrollable) append('S')
+            if (n.isClickable) append('C')
+            if (!n.isVisibleToUser) append('h')
+        }
+        val scrolls = n.actionList.mapNotNull { a ->
+            when (a.id) {
+                AccessibilityNodeInfo.ACTION_SCROLL_FORWARD -> "fwd"
+                AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD -> "back"
+                AccessibilityNodeInfo.AccessibilityAction.ACTION_SCROLL_DOWN.id -> "down"
+                AccessibilityNodeInfo.AccessibilityAction.ACTION_SCROLL_UP.id -> "up"
+                else -> null
+            }
+        }
+        val id = n.viewIdResourceName?.substringAfter(":id/")
+        val t = n.text?.toString()?.replace('\n', ' ')?.take(36)
+        val d = n.contentDescription?.toString()?.replace('\n', ' ')?.take(36)
+        return buildString {
+            append(cls)
+            if (flags.isNotEmpty()) append(" [").append(flags).append(']')
+            if (scrolls.isNotEmpty()) append(" {").append(scrolls.joinToString(",")).append('}')
+            append(" ch=").append(n.childCount)
+            id?.let { append(" #").append(it) }
+            t?.let { append(" t=\"").append(it).append('"') }
+            d?.let { append(" d=\"").append(it).append('"') }
+        }
+    }
+
+    private fun dumpTree(n: AccessibilityNodeInfo, sb: StringBuilder, depth: Int, count: IntArray, max: Int) {
+        if (count[0] >= max || depth > 25) return
+        count[0]++
+        sb.append("  ".repeat(depth)).append(describe(n)).append('\n')
+        for (i in 0 until n.childCount) runCatching { n.getChild(i) }.getOrNull()?.let { dumpTree(it, sb, depth + 1, count, max) }
+    }
+
+    /** YouTube's comments panel is showing ("Comments" with its "Top" / "Newest" tabs). */
+    private fun commentsOpen(root: AccessibilityNodeInfo) =
+        findLabel(root, "comments") != null && findLabel(root, "top") != null && findLabel(root, "newest") != null
+
+    private fun windowsLine() = "windows: " + runCatching { windows }.getOrNull().orEmpty()
+        .joinToString("; ") { "${winType(it.type)} ${it.root?.packageName ?: "?"}${if (it.isActive) " active" else ""}" }
 
     /** YouTube comments read from the app: the formatted comments, how many, and a report. */
     private class CommentsResult(val text: String, val count: Int, val log: String)
@@ -430,8 +530,10 @@ class AskService : AccessibilityService() {
                 done.countDown()
             }
         }, null)
+        swipes++
         if (!sent) return false
         done.await(2, TimeUnit.SECONDS)
+        if (ok) swipesDone++
         return ok
     }
 

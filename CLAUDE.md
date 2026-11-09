@@ -122,6 +122,15 @@ Emulator: any image works again (no native code since 2.2).
   header + ≥3 "@author" rows in one scrolling list), the button sweeps it down (same `sweep`), one comment per list
   row via `ScreenText.formatComment` → "[1.2K likes] text (23 replies)" (no @names/times/buttons), max 150 or
   ~20k chars, + `YOUTUBE_COMMENTS_NOTE`. Checked before the transcript path. Untested on a device.
+  2.13 (device tests of 2.11/2.12 failed: transcript still ~30 s; comments panel gave like counts but no text/authors;
+  once the button read Pocket AI's own panel): `appWindow()` skips our own windows. Likely cause for the missing
+  comment text: YouTube is built with Litho, which only exposes text components to accessibility when touch
+  exploration (TalkBack) is on — so the app's comments (and maybe more) may be unreadable; `commentsOpen` then sends
+  `YOUTUBE_COMMENTS_HIDDEN_NOTE`. Diagnostics: `AskService.report()` (windows, ancestors/rows around the first time
+  stamp and comment author with classes, S/C/h flags, scroll actions, swipes sent/finished) goes into
+  `ScreenCapture.debug`; the panel preview has **Copy details** — ask the owner to paste it before changing the
+  YouTube automation again. The share path's hidden-WebView transcript now reports why it failed
+  (`transcriptProblem`, incl. the page title/URL it landed on) into the tool result.
 - `data/Rates.kt` — NT Media per-model usage multipliers (from its price list; its API doesn't expose
   them). `ReplyUsage.multiplier`/`billed` = tokens × multiplier, shown in chat, usage dialog/screen, model menu.
 - `data/Settings.kt` — `AppSettings` (saved API profiles, search engine/keys), stored as one AES-GCM

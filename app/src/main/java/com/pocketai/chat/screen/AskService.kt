@@ -88,7 +88,9 @@ class AskService : AccessibilityService() {
             bar = runCatching { root.findAccessibilityNodeInfosByViewId(id) }.getOrNull()?.firstOrNull()?.text?.toString()
             if (bar != null) break
         }
-        val yt = if (pkg == ScreenText.YOUTUBE) {
+        // YouTube: with the comments open, read them all; otherwise read (or open) the transcript.
+        val comments = if (pkg == ScreenText.YOUTUBE) runCatching { youTubeComments(root) }.getOrNull() else null
+        val yt = if (pkg == ScreenText.YOUTUBE && comments == null) {
             runCatching { youTubeTranscript(root) }.getOrElse { YtResult(null, false, "error: ${it.message}") }
         } else null
         val transcript = yt?.text
@@ -101,7 +103,7 @@ class AskService : AccessibilityService() {
         val screenText = ScreenText.clean(w.pieces)
         // No (complete) transcript from the app: find the video on YouTube by the title on screen, so the AI gets its
         // exact link (and reads that video's whole transcript) instead of searching news sites about it.
-        val videoLink = if (pkg == ScreenText.YOUTUBE && (transcript == null || yt?.complete != true)) {
+        val videoLink = if (pkg == ScreenText.YOUTUBE && comments == null && (transcript == null || yt?.complete != true)) {
             val titles = ScreenText.titleCandidates(w.pieces)
             if (titles.isEmpty()) null else {
                 toast("Finding the video…")
@@ -122,17 +124,71 @@ class AskService : AccessibilityService() {
             packageName = pkg,
             url = url,
             site = site,
-            text = transcript?.let {
+            text = comments?.let {
+                "The video's top comments (${it.count}, read from the YouTube app; [N likes]):\n${it.text}\n\nRest of the screen:\n$screenText"
+            } ?: transcript?.let {
                 "Transcript (read from the YouTube app's transcript panel; [m:ss] = time in the video):\n$it\n\nRest of the screen:\n$screenText"
             } ?: screenText,
             note = when {
+                comments != null -> ScreenText.YOUTUBE_COMMENTS_NOTE
                 pkg != ScreenText.YOUTUBE || (transcript != null && yt?.complete == true) -> null
                 transcript != null -> ScreenText.youTubePartialNote(videoLink)
                 videoLink != null -> ScreenText.youTubeLinkNote(videoLink)
                 else -> ScreenText.YOUTUBE_NOTE
             },
-            debug = yt?.log,
+            debug = comments?.log ?: yt?.log,
         )
+    }
+
+    /** YouTube comments read from the app: the formatted comments, how many, and a report. */
+    private class CommentsResult(val text: String, val count: Int, val log: String)
+
+    /**
+     * When YouTube's comments panel is open: scrolls through it (top comments first) and keeps each comment with its
+     * likes, up to [MAX_COMMENTS] or about 20k characters. Usernames are dropped.
+     */
+    private fun youTubeComments(root: AccessibilityNodeInfo): CommentsResult? {
+        if (findLabel(root, "comments") == null) return null
+        val list = commentsList(root) ?: return null
+        toast("Reading the comments…")
+        val comments = LinkedHashMap<String, String>()
+        var chars = 0
+        fun collect(): Int {
+            list.refresh()
+            val before = comments.size
+            for (i in 0 until list.childCount) {
+                val row = runCatching { list.getChild(i) }.getOrNull() ?: continue
+                val c = ScreenText.formatComment(texts(row)) ?: continue
+                if (comments.size >= MAX_COMMENTS || chars > 20_000) break
+                if (comments.putIfAbsent(c.substringAfter("] ").take(200), c) == null) chars += c.length
+            }
+            return comments.size - before
+        }
+        collect()
+        val down = if (comments.size < MAX_COMMENTS) sweep(list, Dir.DOWN) { if (comments.size >= MAX_COMMENTS || chars > 20_000) 0 else collect() } else "not needed"
+        if (comments.size < 2) return null
+        return CommentsResult(
+            comments.values.joinToString("\n") { "• $it" },
+            comments.size,
+            "read ${comments.size} comments; down: $down",
+        )
+    }
+
+    /** The list of YouTube's comments panel: the nearest scrolling container around comment authors (@names). */
+    private fun commentsList(root: AccessibilityNodeInfo): AccessibilityNodeInfo? {
+        val queue = ArrayDeque<AccessibilityNodeInfo>().apply { add(root) }
+        val hits = mutableListOf<AccessibilityNodeInfo>()
+        var seen = 0
+        while (queue.isNotEmpty() && seen < 8_000 && hits.size < 6) {
+            val n = queue.removeFirst()
+            seen++
+            val t = (n.text ?: n.contentDescription)?.toString()?.trim()
+            if (t != null && n.isVisibleToUser && ScreenText.isCommentAuthor(t)) hits += n
+            for (i in 0 until n.childCount) runCatching { n.getChild(i) }.getOrNull()?.let { queue.add(it) }
+        }
+        // At least three comment authors in the same scrolling list (the video page's one-comment preview isn't it).
+        val lists = hits.mapNotNull { h -> generateSequence(h.parent) { it.parent }.firstOrNull { it.isScrollable } }
+        return lists.groupBy { it }.entries.firstOrNull { it.value.size >= 3 }?.key
     }
 
     /** What reading the YouTube app's transcript gave: the text, whether it covers the whole video, and a report. */
@@ -434,6 +490,9 @@ class AskService : AccessibilityService() {
     private fun texts(node: AccessibilityNodeInfo): List<String> = Walk(false).also { walk(node, it, false, 0) }.pieces
 
     companion object {
+        /** YouTube comments read per tap: plenty to judge what people think, without reading thousands. */
+        private const val MAX_COMMENTS = 150
+
         /** Whether the user has turned the Pocket AI button on in Accessibility settings. */
         fun isOn(ctx: Context): Boolean {
             val enabled = Settings.Secure.getString(ctx.contentResolver, Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES) ?: return false

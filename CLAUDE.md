@@ -118,6 +118,10 @@ Emulator: any image works again (no native code since 2.2).
   complete = starts ≤0:15 and reaches ≥85% of the player's length (`ScreenText.videoLength`). Incomplete → video
   link lookup + `youTubePartialNote` (fetch_url the link before answering). `ScreenCapture.debug` ("How it went")
   is shown under the panel's "What Pocket AI read" preview — ask the owner for a screenshot of it when debugging.
+  2.12 (owner: "comments section summary good too if can read it all"): with YouTube's comments panel open ("Comments"
+  header + ≥3 "@author" rows in one scrolling list), the button sweeps it down (same `sweep`), one comment per list
+  row via `ScreenText.formatComment` → "[1.2K likes] text (23 replies)" (no @names/times/buttons), max 150 or
+  ~20k chars, + `YOUTUBE_COMMENTS_NOTE`. Checked before the transcript path. Untested on a device.
 - `data/Rates.kt` — NT Media per-model usage multipliers (from its price list; its API doesn't expose
   them). `ReplyUsage.multiplier`/`billed` = tokens × multiplier, shown in chat, usage dialog/screen, model menu.
 - `data/Settings.kt` — `AppSettings` (saved API profiles, search engine/keys), stored as one AES-GCM

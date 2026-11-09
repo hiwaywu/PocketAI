@@ -108,4 +108,17 @@ class ScreenTextTest {
         assertEquals(3723, ScreenText.videoLength(listOf("10:00 / 1:02:03")))
         assertNull(ScreenText.videoLength(listOf("Reply", "1:49")))
     }
+
+    @Test fun youTubeComments() {
+        val row = listOf(
+            "@kellyfan88 · 2 days ago", "TVB really milked this for promotion and then dumped her.", "Read more",
+            "Like this comment along with 1.2K other people", "1.2K", "Dislike", "Reply", "23 replies",
+        )
+        assertEquals("[1.2K likes] TVB really milked this for promotion and then dumped her. (23 replies)", ScreenText.formatComment(row))
+        assertEquals("[0 likes] So true", ScreenText.formatComment(listOf("@a_b", "So true", "Reply")))
+        assertNull(ScreenText.formatComment(listOf("Comments", "Top", "Newest")))
+        assertNull(ScreenText.formatComment(listOf("Some video title", "1.2M views")))
+        assertTrue(ScreenText.isCommentAuthor("@kellyfan88 · 2 days ago"))
+        assertFalse(ScreenText.isCommentAuthor("八八卦卦"))
+    }
 }

@@ -147,12 +147,17 @@ Emulator: any image works again (no native code since 2.2).
   so `screen/FloatingButton.kt` draws our own bubble as a `TYPE_ACCESSIBILITY_OVERLAY` window from the service (no
   overlay permission): tap = ask, drag = move + snap to edge (`ui` prefs floatingButtonX/Y), hold = menu (hide 1 hour
   / until turned back on / cancel). Hidden while AskActivity is visible. On/off: Settings switch, Quick Settings tile
-  `screen/ButtonTile.kt` (StatusBarManager.requestAddTileService on API 33+). The service keeps
-  `flagRequestAccessibilityButton` (it's what keeps the service enabled), so the system button stays unless the owner
-  switches its Location to "Swipe up with 2 fingers" (tip in Settings).
+  `screen/ButtonTile.kt` (StatusBarManager.requestAddTileService on API 33+).
   2.17: "hide" means tuck into the side, not remove: hold → slides ~64% past the nearest edge (tab, alpha 0.6,
   `ui` pref floatingButtonTucked, kept across apps); tap the tab → slides back; drag → untucks and snaps; hold the
   tab → the hide menu (1 hour / until turned back on).
+  2.18 (owner: "you don't need two buttons", keep only the new one): `flagRequestAccessibilityButton` removed. With it
+  (targetSdk > Q) Android treats the service as an "invisible toggle": it is on only while assigned to a shortcut, and
+  AccessibilityManagerService re-adds an enabled button-requesting service to the button targets, so Android's own
+  button always came back. Now it's a normal toggle (on/off switch in Accessibility settings, no shortcut needed) and
+  the floating bubble is the only button. Old installs keep the shortcut: tapping Android's button would now switch
+  the service off, so Settings shows how to turn the shortcut off while `AskService.systemButtonAssigned`
+  (Secure `accessibility_button_targets`) says it's still there.
 - `data/Rates.kt` — NT Media per-model usage multipliers (from its price list; its API doesn't expose
   them). `ReplyUsage.multiplier`/`billed` = tokens × multiplier, shown in chat, usage dialog/screen, model menu.
 - `data/Settings.kt` — `AppSettings` (saved API profiles, search engine/keys), stored as one AES-GCM

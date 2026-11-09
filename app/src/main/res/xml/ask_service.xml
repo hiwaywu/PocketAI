@@ -1,11 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- The "Ask Pocket AI" accessibility button: reads the app on screen only when it's tapped. -->
+<!-- "Ask Pocket AI": draws Pocket AI's own floating button and reads the app on screen only when it's tapped.
+     No flagRequestAccessibilityButton (2.18): with it Android treats the service as an "invisible toggle" that lives
+     and dies with its shortcut and keeps re-adding its own accessibility button, so the owner saw two buttons. -->
 <accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
     android:description="@string/ask_service_description"
     android:summary="@string/ask_service_summary"
     android:accessibilityEventTypes="typeWindowStateChanged"
     android:accessibilityFeedbackType="feedbackGeneric"
-    android:accessibilityFlags="flagRequestAccessibilityButton|flagReportViewIds|flagRetrieveInteractiveWindows|flagIncludeNotImportantViews"
+    android:accessibilityFlags="flagReportViewIds|flagRetrieveInteractiveWindows|flagIncludeNotImportantViews"
     android:canRetrieveWindowContent="true"
     android:canPerformGestures="true"
     android:notificationTimeout="1000"

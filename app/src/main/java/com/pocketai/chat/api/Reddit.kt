@@ -105,6 +105,24 @@ object Reddit {
 
     private val MEDIA_EXT = listOf(".jpg", ".jpeg", ".png", ".gif", ".gifv", ".webp", ".mp4", ".webm", ".mov", ".mp3", ".pdf")
 
+    /** Reddit's search (JSON), to find a thread seen in the Reddit app by its title. */
+    fun searchUrl(subreddit: String?, title: String): String {
+        val q = java.net.URLEncoder.encode(title.take(200), "UTF-8")
+        return if (subreddit != null) "https://www.reddit.com/$subreddit/search.json?q=$q&restrict_sr=1&sort=relevance&t=all&limit=10&raw_json=1"
+        else "https://www.reddit.com/search.json?q=$q&sort=relevance&t=all&limit=10&raw_json=1"
+    }
+
+    /** Search results → (title, thread link). */
+    fun parseSearch(raw: String): List<Pair<String, String>> {
+        val root = runCatching { json.parseToJsonElement(raw) }.getOrNull() ?: return emptyList()
+        return root.children().mapNotNull { c ->
+            val d = c.data() ?: return@mapNotNull null
+            val title = d.s("title") ?: return@mapNotNull null
+            val link = d.s("permalink")?.let { "https://www.reddit.com$it" } ?: return@mapNotNull null
+            title to link
+        }
+    }
+
     // ------------------------------------------------------------------ Reddit's JSON
 
     fun parse(raw: String): RedditThread? {

@@ -51,6 +51,18 @@ object ScreenText {
     val BROWSERS = URL_BAR_IDS.map { it.substringBefore(":id/") }.toSet()
 
     const val YOUTUBE = "com.google.android.youtube"
+    const val REDDIT_APP = "com.reddit.frontpage"
+
+    private val NOT_REDDIT_TITLE = Regex(
+        """(?i)^(u/|r/|\d[\d.,]*\s*[kmb]?$|join(ed)?$|share$|reply$|award|upvote|downvote|vote$|sort by|top \d+% |comments?$|\d+\s*(comments?|votes?|upvotes?)$)""",
+    )
+
+    /** Lines from a Reddit app screen that could be the post's title, best first (the title comes first). */
+    fun redditTitleCandidates(pieces: List<String>): List<String> =
+        pieces.map { it.trim() }
+            .filter { com.pocketai.chat.api.PageText.weight(it) >= 20 && it.length <= 300 && !NOT_REDDIT_TITLE.containsMatchIn(it) }
+            .distinct()
+            .take(3)
 
     /** Sent with a YouTube app screen when its transcript couldn't be read there. */
     const val YOUTUBE_NOTE =

@@ -76,15 +76,45 @@ class AskService : AccessibilityService() {
      * Pocket AI's own panel is skipped: tapping the button while a panel is still open read the panel itself.
      */
     private fun appWindow(): AccessibilityWindowInfo? {
-        val apps = runCatching { windows }.getOrNull().orEmpty()
-            .filter { it.type == AccessibilityWindowInfo.TYPE_APPLICATION && it.root?.packageName?.toString() != packageName }
-        return apps.firstOrNull { it.isActive } ?: apps.firstOrNull { it.isFocused } ?: apps.firstOrNull()
+        val apps = appWindows()
+        chosenWindow?.let { id -> apps.firstOrNull { it.id == id }?.let { return it } }
+        return apps.firstOrNull()
+    }
+
+    /** App windows other than Pocket AI's, the active (then focused) one first. */
+    private fun appWindows(): List<AccessibilityWindowInfo> = runCatching { windows }.getOrNull().orEmpty()
+        .filter { it.type == AccessibilityWindowInfo.TYPE_APPLICATION && it.root?.packageName?.toString() != packageName }
+        .sortedByDescending { (if (it.isActive) 2 else 0) + (if (it.isFocused) 1 else 0) }
+
+    /** The window read on this tap (later steps, like YouTube's transcript, keep using it). */
+    @Volatile private var chosenWindow: Int? = null
+    /** Text found in each app window on this tap, for the report. */
+    private var windowTexts = ""
+
+    /**
+     * The window to read: the active one, unless another app window has far more text. An app can have an empty
+     * window marked "active" (the Reddit app read as nothing in 2.14).
+     */
+    private fun pickWindow(): AccessibilityWindowInfo? {
+        val sized = appWindows().map { win ->
+            val r = win.root
+            val w = Walk(r?.packageName?.toString() in ScreenText.BROWSERS)
+            if (r != null) walk(r, w, false, 0)
+            win to w.pieces.sumOf { it.length }
+        }
+        windowTexts = sized.joinToString("; ") { (win, n) -> "${win.root?.packageName ?: "?"}${if (win.isActive) " active" else ""} $n chars" }
+        if (sized.isEmpty()) return null
+        val most = sized.maxByOrNull { it.second }!!
+        val first = sized.first()
+        return if (first.second >= 50 && first.second * 2 >= most.second) first.first else most.first
     }
 
     private fun readScreen(): ScreenCapture? {
         swipes = 0
         swipesDone = 0
-        val win = appWindow()
+        chosenWindow = null
+        val win = pickWindow()
+        chosenWindow = win?.id
         val root = win?.root ?: rootInActiveWindow?.takeIf { it.packageName?.toString() != packageName }
             ?: return ScreenCapture("screen", "this app", text = "", debug = "no app window to read\n" + windowsLine())
         val pkg = root.packageName?.toString()
@@ -122,6 +152,24 @@ class AskService : AccessibilityService() {
             }
         } else null
         if (videoLink != null) url = videoLink
+        // Reddit app: find the thread on reddit.com by the title on screen and read all of it (post, linked
+        // article, top comments), like a shared link. The app itself only shows what's on screen.
+        var redditLog: String? = null
+        val thread = if (pkg == ScreenText.REDDIT_APP) {
+            val sub = w.pieces.map { it.trim() }.firstOrNull { Regex("""^r/[A-Za-z0-9_]{2,}$""").matches(it) }
+            val titles = ScreenText.redditTitleCandidates(w.pieces)
+            if (titles.isEmpty()) { redditLog = "reddit: no title on screen"; null } else {
+                toast("Reading the Reddit thread…")
+                val page = runCatching {
+                    kotlinx.coroutines.runBlocking {
+                        kotlinx.coroutines.withTimeoutOrNull(30_000) { (application as PocketApp).chat.readRedditThread(sub, titles) }
+                    }
+                }.getOrNull()
+                redditLog = if (page != null) "reddit: read ${page.url}" else "reddit: no thread found for ${titles.take(2)} in ${sub ?: "all of Reddit"}"
+                page
+            }
+        } else null
+        if (thread != null) url = thread.url
         val label = runCatching {
             packageManager.getApplicationLabel(packageManager.getApplicationInfo(pkg ?: "", 0)).toString()
         }.getOrNull()
@@ -131,7 +179,7 @@ class AskService : AccessibilityService() {
             packageName = pkg,
             url = url,
             site = site,
-            text = comments?.let {
+            text = thread?.let { "${it.text}\n\nOn screen in the Reddit app:\n$screenText" } ?: comments?.let {
                 "The video's top comments (${it.count}, read from the YouTube app; [N likes]):\n${it.text}\n\nRest of the screen:\n$screenText"
             } ?: transcript?.let {
                 "Transcript (read from the YouTube app's transcript panel; [m:ss] = time in the video):\n$it\n\nRest of the screen:\n$screenText"
@@ -144,7 +192,7 @@ class AskService : AccessibilityService() {
                 videoLink != null -> ScreenText.youTubeLinkNote(videoLink)
                 else -> ScreenText.YOUTUBE_NOTE
             },
-            debug = listOfNotNull(comments?.log ?: yt?.log, if (pkg == ScreenText.YOUTUBE) runCatching { report(root, win) }.getOrNull() else null)
+            debug = listOfNotNull(comments?.log ?: yt?.log, redditLog, runCatching { report(root, win) }.getOrNull())
                 .joinToString("\n").ifBlank { null },
         )
     }
@@ -164,6 +212,7 @@ class AskService : AccessibilityService() {
         sb.append("windows: ").append(wins.joinToString("; ") { w ->
             "${winType(w.type)} ${w.root?.packageName ?: "?"}${if (w.isActive) " active" else ""}${if (w.isFocused) " focused" else ""}${if (w == chosen) " ←read" else ""}"
         }).append('\n')
+        sb.append("text per app window: $windowTexts\n")
         sb.append("swipes: $swipes sent, $swipesDone finished\n")
         val time = timeLines(root, 1).firstOrNull()
         val author = findText(root) { ScreenText.isCommentAuthor(it) }

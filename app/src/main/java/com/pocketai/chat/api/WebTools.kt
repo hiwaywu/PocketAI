@@ -351,6 +351,24 @@ return JSON.stringify({u:location.href.slice(0,90),t:(document.title||'').slice(
         return FetchedPage(title, link, Reddit.format(t, System.currentTimeMillis(), linked))
     }
 
+    /**
+     * The link of the Reddit thread whose title is one of [titles] (lines read from the Reddit app), searched in
+     * [subreddit] ("r/NowInTech") when known. Null if none matches.
+     */
+    suspend fun findRedditThread(subreddit: String?, titles: List<String>): String? = withContext(Dispatchers.IO) {
+        for (t in titles.take(3)) {
+            // In the subreddit first (precise), then all of Reddit.
+            val scopes: List<String?> = if (subreddit != null) listOf(subreddit, null) else listOf(null)
+            for (sub in scopes) {
+                val url = Reddit.searchUrl(sub, t)
+                val raw = listOf(REDDIT_UA, UA).firstNotNullOfOrNull { ua -> runCatching { getText(url, ua, "application/json") }.getOrNull() }
+                    ?: continue
+                Reddit.parseSearch(raw).firstOrNull { PageText.sameTitle(t, it.first) }?.let { return@withContext it.second }
+            }
+        }
+        null
+    }
+
     /** Follows a short link's redirects without downloading the page. */
     private fun resolveRedirect(url: String): String {
         var current = url

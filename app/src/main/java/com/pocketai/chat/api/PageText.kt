@@ -85,6 +85,37 @@ object PageText {
         return Meta(site, author, dated)
     }
 
+    /**
+     * Whether a title read from an app's screen is the same as a search result's title: they share a long enough
+     * stretch of text (Chinese characters count 2.5×), so extra words around either one don't matter.
+     */
+    fun sameTitle(screen: String, candidate: String): Boolean {
+        val a = norm(screen)
+        val b = norm(candidate)
+        if (b.isEmpty() || weight(a) < 12) return false
+        val shorter = if (b.length < a.length) b else a
+        return weight(commonRun(a, b)) >= minOf(15.0, weight(shorter) * 0.8)
+    }
+
+    private fun norm(s: String) = s.lowercase().filter { it.isLetterOrDigit() }
+
+    /** The longest stretch of text two strings share. */
+    private fun commonRun(a: String, b: String): String {
+        var best = 0
+        var end = 0
+        val prev = IntArray(b.length + 1)
+        for (i in 1..a.length) {
+            var diag = 0
+            for (j in 1..b.length) {
+                val up = prev[j]
+                prev[j] = if (a[i - 1] == b[j - 1]) diag + 1 else 0
+                if (prev[j] > best) { best = prev[j]; end = i }
+                diag = up
+            }
+        }
+        return a.substring(end - best, end)
+    }
+
     /** og:type article or schema.org NewsArticle/Article/BlogPosting/Report. */
     private fun declaresArticle(doc: Document): Boolean {
         if (doc.selectFirst("meta[property=og:type]")?.attr("content")?.trim()?.equals("article", true) == true) return true

@@ -130,4 +130,16 @@ class RedditTest {
         assertEquals("250k", Reddit.compact(250_400))
         assertEquals("1.5M", Reddit.compact(1_500_000))
     }
+
+    @Test fun findsTheThreadFromTheApp() {
+        val search = """{"kind":"Listing","data":{"children":[
+          {"kind":"t3","data":{"title":"Anthropic buys ${'$'}3.4bn of gas generators for its data centres, FT reports","permalink":"/r/NowInTech/comments/1abcde/anthropic_buys/"}},
+          {"kind":"t3","data":{"title":"Something else entirely","permalink":"/r/NowInTech/comments/2xyz/other/"}}]}}"""
+        val hits = Reddit.parseSearch(search)
+        assertEquals("https://www.reddit.com/r/NowInTech/comments/1abcde/anthropic_buys/", hits[0].second)
+        val screenTitle = "Anthropic buys ${'$'}3.4bn of gas generators for its data centres, FT reports"
+        assertTrue(PageText.sameTitle(screenTitle, hits[0].first))
+        assertFalse(PageText.sameTitle(screenTitle, hits[1].first))
+        assertTrue(Reddit.searchUrl("r/NowInTech", "x y").startsWith("https://www.reddit.com/r/NowInTech/search.json?q=x+y&restrict_sr=1"))
+    }
 }

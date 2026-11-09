@@ -1,6 +1,7 @@
 package com.pocketai.chat.screen
 
 import android.accessibilityservice.AccessibilityService
+import android.animation.ValueAnimator
 import android.content.Context
 import android.content.res.Configuration
 import android.graphics.Color
@@ -25,9 +26,9 @@ import kotlin.math.hypot
 
 /**
  * Pocket AI's own floating button, drawn by the accessibility service over other apps (no extra permission).
- * Tap: ask about the screen. Drag: move it (it snaps to the nearest edge and stays there). Hold: hide it for an
- * hour or until it's turned back on (Pocket AI → Settings, or the Quick Settings tile). It also steps aside while
- * the Pocket AI panel is open, so it doesn't cover the panel's buttons.
+ * Tap: ask about the screen. Drag: move it (it snaps to the nearest edge and stays there). Hold: tuck it into the
+ * side edge as a small tab (tap the tab to bring it back; hold the tab to hide it for an hour or until it's turned
+ * back on). It also steps aside while the Pocket AI panel is open, so it doesn't cover the panel's buttons.
  */
 class FloatingButton(private val service: AccessibilityService, private val onTap: () -> Unit) {
     private val wm = service.getSystemService(WindowManager::class.java)
@@ -60,7 +61,45 @@ class FloatingButton(private val service: AccessibilityService, private val onTa
     fun onScreenChanged() = main.post {
         val v = view ?: return@post
         val p = params ?: return@post
-        snap(v, p)
+        if (tucked) {
+            p.x = tuckedX(onLeft())
+            runCatching { wm.updateViewLayout(v, p) }
+        } else snap(v, p)
+    }
+
+    /** Tucked into the side edge as a tab (stays that way across apps until tapped out). */
+    private var tucked: Boolean
+        get() = prefs.getBoolean(KEY_TUCKED, false)
+        set(value) = prefs.edit().putBoolean(KEY_TUCKED, value).apply()
+
+    private fun onLeft(): Boolean = prefs.getInt(KEY_X, Int.MAX_VALUE) < screen().first / 2
+
+    /** Where the tucked tab sits: mostly past the edge, about a third still showing. */
+    private fun tuckedX(left: Boolean): Int = if (left) -(size * 0.64f).toInt() else screen().first - (size * 0.36f).toInt()
+
+    private fun slide(v: View, p: WindowManager.LayoutParams, to: Int) {
+        ValueAnimator.ofInt(p.x, to).apply {
+            duration = 180
+            addUpdateListener {
+                p.x = it.animatedValue as Int
+                runCatching { wm.updateViewLayout(v, p) }
+            }
+            start()
+        }
+    }
+
+    private fun tuck(v: View, p: WindowManager.LayoutParams) {
+        tucked = true
+        v.alpha = TUCKED_ALPHA
+        v.contentDescription = "Pocket AI button, tucked away. Tap to bring it back; hold to hide it."
+        slide(v, p, tuckedX(onLeft()))
+    }
+
+    private fun untuck(v: View, p: WindowManager.LayoutParams) {
+        tucked = false
+        v.alpha = IDLE_ALPHA
+        v.contentDescription = DESCRIPTION
+        slide(v, p, if (onLeft()) margin else screen().first - size - margin)
     }
 
     private fun shouldShow() = isOn(service) && !panelOpen && System.currentTimeMillis() >= prefs.getLong(KEY_UNTIL, 0)
@@ -79,7 +118,7 @@ class FloatingButton(private val service: AccessibilityService, private val onTa
             PixelFormat.TRANSLUCENT,
         ).apply {
             gravity = Gravity.TOP or Gravity.START
-            x = prefs.getInt(KEY_X, w - size - margin).coerceIn(0, (w - size).coerceAtLeast(0))
+            x = if (tucked) tuckedX(onLeft()) else prefs.getInt(KEY_X, w - size - margin).coerceIn(0, (w - size).coerceAtLeast(0))
             y = prefs.getInt(KEY_Y, (h * 0.42).toInt()).coerceIn(0, (h - size).coerceAtLeast(0))
         }
         val v = FrameLayout(service).apply {
@@ -88,8 +127,8 @@ class FloatingButton(private val service: AccessibilityService, private val onTa
                 setColor(0xF0334FD6.toInt())
             }
             elevation = 6 * dp
-            alpha = IDLE_ALPHA
-            contentDescription = "Ask Pocket AI about this screen. Hold to hide."
+            alpha = if (tucked) TUCKED_ALPHA else IDLE_ALPHA
+            contentDescription = DESCRIPTION
             addView(
                 ImageView(service).apply {
                     setImageResource(R.drawable.ic_notification)
@@ -124,7 +163,8 @@ class FloatingButton(private val service: AccessibilityService, private val onTa
             if (!dragging) {
                 held = true
                 v.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
-                showMenu()
+                // Hold the button: tuck it into the side. Hold the tab: the hide menu.
+                if (tucked) showMenu() else tuck(v, p)
             }
         }
 
@@ -137,7 +177,7 @@ class FloatingButton(private val service: AccessibilityService, private val onTa
                     startY = p.y
                     dragging = false
                     held = false
-                    v.alpha = 1f
+                    if (!tucked) v.alpha = 1f
                     main.postDelayed(hold, ViewConfiguration.getLongPressTimeout().toLong())
                 }
                 MotionEvent.ACTION_MOVE -> {
@@ -155,16 +195,23 @@ class FloatingButton(private val service: AccessibilityService, private val onTa
                 }
                 MotionEvent.ACTION_UP -> {
                     main.removeCallbacks(hold)
-                    v.alpha = IDLE_ALPHA
                     when {
                         held -> {}
-                        dragging -> snap(v, p)
-                        else -> onTap()
+                        dragging -> {
+                            tucked = false
+                            v.alpha = IDLE_ALPHA
+                            snap(v, p)
+                        }
+                        tucked -> untuck(v, p)
+                        else -> {
+                            v.alpha = IDLE_ALPHA
+                            onTap()
+                        }
                     }
                 }
                 MotionEvent.ACTION_CANCEL -> {
                     main.removeCallbacks(hold)
-                    v.alpha = IDLE_ALPHA
+                    v.alpha = if (tucked) TUCKED_ALPHA else IDLE_ALPHA
                 }
             }
             return true
@@ -249,6 +296,9 @@ class FloatingButton(private val service: AccessibilityService, private val onTa
         private const val KEY_UNTIL = "floatingButtonHiddenUntil"
         private const val KEY_X = "floatingButtonX"
         private const val KEY_Y = "floatingButtonY"
+        private const val KEY_TUCKED = "floatingButtonTucked"
+        private const val TUCKED_ALPHA = 0.6f
+        private const val DESCRIPTION = "Ask Pocket AI about this screen. Hold to tuck it into the side."
         private const val HOUR = 60 * 60_000L
         private const val IDLE_ALPHA = 0.88f
 

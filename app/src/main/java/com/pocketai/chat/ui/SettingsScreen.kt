@@ -505,7 +505,7 @@ private fun AskButtonSection() {
             Column(Modifier.weight(1f)) {
                 Text("Floating Pocket AI button")
                 Text(
-                    "Tap to ask · hold to hide · drag to move",
+                    "Tap to ask · hold to tuck it into the side · drag to move",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )

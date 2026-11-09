@@ -494,11 +494,11 @@ class AskService : AccessibilityService() {
         root ?: return null
         val hits = timeLines(root, 4)
         if (hits.size < 3) return null
-        fun holdsTimes(n: AccessibilityNodeInfo) = texts(n).count { ScreenText.leadingTime(it) != null } >= 3
-        for (h in hits) {
-            generateSequence(h.parent) { it.parent }.firstOrNull { it.isScrollable }?.let { if (holdsTimes(it)) return it }
-        }
-        return generateSequence(hits[0].parent) { it.parent }.take(12).firstOrNull { holdsTimes(it) }
+        // The list is the smallest container around them holding several transcript lines (each row is read by
+        // YouTube as "5 minutes, 42 seconds two legs on…", or a time chip next to its words). Taking the nearest
+        // scrolling container could pick the whole video page instead.
+        fun holdsLines(n: AccessibilityNodeInfo) = ScreenText.transcriptSegments(texts(n)).size >= 3
+        return generateSequence(hits[0].parent) { it.parent }.take(12).firstOrNull { holdsLines(it) }
     }
 
     /** A finger-like swipe on [node] that scrolls it one way by most of its height. */

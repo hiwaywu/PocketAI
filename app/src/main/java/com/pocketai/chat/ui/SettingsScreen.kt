@@ -466,9 +466,11 @@ private fun AskButtonSection() {
     val context = LocalContext.current
     var on by remember { mutableStateOf(AskService.isOn(context)) }
     var floating by remember { mutableStateOf(FloatingButton.isShowing(context)) }
+    var systemButton by remember { mutableStateOf(AskService.systemButtonAssigned(context)) }
     LifecycleResumeEffect(Unit) {
         on = AskService.isOn(context)
         floating = FloatingButton.isShowing(context)
+        systemButton = AskService.systemButtonAssigned(context)
         onPauseOrDispose {}
     }
     SectionTitle("Pocket AI in other apps")
@@ -479,8 +481,8 @@ private fun AskButtonSection() {
     )
     if (!on) {
         Text(
-            "1. Tap Accessibility settings → Installed apps → Ask Pocket AI → turn it on, and choose the floating " +
-                "button as its shortcut.\n2. If Android says \"Restricted setting\", tap App info → ⋮ → Allow restricted " +
+            "1. Tap Accessibility settings → Installed apps → Ask Pocket AI → turn it on. No shortcut needed: " +
+                "Pocket AI shows its own button.\n2. If Android says \"Restricted setting\", tap App info → ⋮ → Allow restricted " +
                 "settings, then try step 1 again.\nAndroid shows its standard warning for accessibility apps; Pocket AI " +
                 "only reads the screen when you tap its button.",
             style = MaterialTheme.typography.bodySmall,
@@ -512,12 +514,12 @@ private fun AskButtonSection() {
             }
             Switch(checked = floating, onCheckedChange = { FloatingButton.setOn(context, it); floating = it })
         }
-        Text(
-            "Seeing two round buttons? Android adds its own too. To remove that one: Accessibility settings → Ask Pocket AI " +
-                "→ ⚙ next to \"Tap Accessibility button\" → Location → \"Swipe up with 2 fingers\". Pocket AI stays on, " +
-                "and that swipe asks Pocket AI too.",
+        if (systemButton != false) Text(
+            "Still seeing Android's own accessibility button too? You don't need it any more: Accessibility settings → " +
+                "Installed apps → Ask Pocket AI → turn off its shortcut (keep Ask Pocket AI itself on). Until then, " +
+                "tapping Android's button switches Pocket AI off.",
             style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            color = if (systemButton == true) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
         )
         if (Build.VERSION.SDK_INT >= 33) {
             OutlinedButton(onClick = {

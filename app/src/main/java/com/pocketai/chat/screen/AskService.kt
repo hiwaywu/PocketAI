@@ -1,6 +1,5 @@
 package com.pocketai.chat.screen
 
-import android.accessibilityservice.AccessibilityButtonController
 import android.accessibilityservice.AccessibilityService
 import android.accessibilityservice.GestureDescription
 import android.graphics.Path
@@ -21,13 +20,11 @@ import com.pocketai.chat.AskActivity
 import com.pocketai.chat.PocketApp
 
 /**
- * The "Ask Pocket AI" accessibility button. Tapping it reads the app on screen (its text, and the page's link
- * in browsers) and opens the Pocket AI panel over that app. Nothing is read until the button is tapped:
+ * "Ask Pocket AI": an accessibility service that draws Pocket AI's own floating button ([FloatingButton]). Tapping
+ * it reads the app on screen (its text, and the page's link in browsers) and opens the Pocket AI panel over that app. Nothing is read until the button is tapped:
  * events are ignored, and Gemini keeps the side button and its own screen features.
  */
 class AskService : AccessibilityService() {
-    private var callback: AccessibilityButtonController.AccessibilityButtonCallback? = null
-
     /** Pocket AI's own floating button (tap to ask, hold to hide). */
     var button: FloatingButton? = null
         private set
@@ -36,11 +33,6 @@ class AskService : AccessibilityService() {
         super.onServiceConnected()
         instance = this
         button = FloatingButton(this) { askAboutScreen() }.also { it.refresh() }
-        val cb = object : AccessibilityButtonController.AccessibilityButtonCallback() {
-            override fun onClicked(controller: AccessibilityButtonController) = askAboutScreen()
-        }
-        accessibilityButtonController.registerAccessibilityButtonCallback(cb)
-        callback = cb
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {}
@@ -63,8 +55,6 @@ class AskService : AccessibilityService() {
         button?.destroy()
         button = null
         if (instance === this) instance = null
-        callback?.let { accessibilityButtonController.unregisterAccessibilityButtonCallback(it) }
-        callback = null
         return super.onUnbind(intent)
     }
 
@@ -672,9 +662,20 @@ class AskService : AccessibilityService() {
         /** Whether the user has turned the Pocket AI button on in Accessibility settings. */
         fun isOn(ctx: Context): Boolean {
             val enabled = Settings.Secure.getString(ctx.contentResolver, Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES) ?: return false
-            return enabled.split(':').any { s ->
-                ComponentName.unflattenFromString(s)?.let { it.packageName == ctx.packageName && it.className == AskService::class.java.name } == true
-            }
+            return isUs(ctx, enabled)
+        }
+
+        /**
+         * Whether Android's own accessibility button still has Ask Pocket AI as its shortcut (set up before 2.18, when
+         * the service asked for that button). Tapping it now would switch the service off, so Settings says how to
+         * remove it. Null when Android doesn't let us read that setting.
+         */
+        fun systemButtonAssigned(ctx: Context): Boolean? = runCatching {
+            isUs(ctx, Settings.Secure.getString(ctx.contentResolver, "accessibility_button_targets").orEmpty())
+        }.getOrNull()
+
+        private fun isUs(ctx: Context, list: String) = list.split(':').any { s ->
+            ComponentName.unflattenFromString(s)?.let { it.packageName == ctx.packageName && it.className == AskService::class.java.name } == true
         }
     }
 }

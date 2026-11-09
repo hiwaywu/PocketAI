@@ -1,7 +1,11 @@
 package com.pocketai.chat.ui
 
+import android.app.StatusBarManager
+import android.content.ComponentName
 import android.content.Intent
+import android.graphics.drawable.Icon
 import android.net.Uri
+import android.os.Build
 import android.provider.Settings
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.horizontalScroll
@@ -62,6 +66,8 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.pocketai.chat.screen.AskService
+import com.pocketai.chat.screen.ButtonTile
+import com.pocketai.chat.screen.FloatingButton
 import com.pocketai.chat.ChatViewModel
 import com.pocketai.chat.data.ADDRESS_SUGGESTIONS
 import com.pocketai.chat.data.DEFAULT_SYSTEM_PROMPT
@@ -459,8 +465,10 @@ private fun Dropdown(label: String, value: String, options: List<String>, onSele
 private fun AskButtonSection() {
     val context = LocalContext.current
     var on by remember { mutableStateOf(AskService.isOn(context)) }
+    var floating by remember { mutableStateOf(FloatingButton.isShowing(context)) }
     LifecycleResumeEffect(Unit) {
         on = AskService.isOn(context)
+        floating = FloatingButton.isShowing(context)
         onPauseOrDispose {}
     }
     SectionTitle("Pocket AI in other apps")
@@ -491,6 +499,38 @@ private fun AskButtonSection() {
                 )
             }
         }) { Text("App info") }
+    }
+    if (on) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text("Floating Pocket AI button")
+                Text(
+                    "Tap to ask · hold to hide · drag to move",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Switch(checked = floating, onCheckedChange = { FloatingButton.setOn(context, it); floating = it })
+        }
+        Text(
+            "Seeing two round buttons? Android adds its own too. To remove that one: Accessibility settings → Ask Pocket AI " +
+                "→ ⚙ next to \"Tap Accessibility button\" → Location → \"Swipe up with 2 fingers\". Pocket AI stays on, " +
+                "and that swipe asks Pocket AI too.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        if (Build.VERSION.SDK_INT >= 33) {
+            OutlinedButton(onClick = {
+                runCatching {
+                    context.getSystemService(StatusBarManager::class.java).requestAddTileService(
+                        ComponentName(context, ButtonTile::class.java),
+                        "Pocket AI button",
+                        Icon.createWithResource(context, com.pocketai.chat.R.drawable.ic_notification),
+                        context.mainExecutor,
+                    ) {}
+                }
+            }) { Text("Add show/hide to Quick Settings") }
+        }
     }
     Text(
         "Also: select text in any app → ⋮ → Ask Pocket AI.",

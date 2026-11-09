@@ -158,6 +158,16 @@ Emulator: any image works again (no native code since 2.2).
   the floating bubble is the only button. Old installs keep the shortcut: tapping Android's button would now switch
   the service off, so Settings shows how to turn the shortcut off while `AskService.systemButtonAssigned`
   (Secure `accessibility_button_targets`) says it's still there.
+  2.19 — **the YouTube-app automation (2.5–2.14: tapping "...more"/"Show transcript", pausing, sweeping the
+  transcript/comments lists, swipes) was removed**: after ten versions it still read only ~20 s of transcript and no
+  comment text, while sharing a YouTube link to Pocket AI read the whole transcript on the owner's Fold (Nov 9 2026,
+  CNBC clip). Now the button in YouTube only reads the screen, finds the video by its title
+  (`ChatViewModel.readYouTubeVideo` = `WebTools.findYouTubeVideo` + `fetch`, ≤50 s) and attaches that page like the
+  Reddit-app path; not found → `YOUTUBE_NOTE`. Comments can't be read at all (app hides the text, the link reader has
+  none): `YOUTUBE_COMMENTS_HIDDEN_NOTE` and the YouTube guide tell the model to say so and not offer a link route; the
+  panel no longer suggests "What do the comments say?". If comments are wanted again: YouTube Data API
+  `commentThreads.list` with a free Google API key (offered to the owner, not built). The old automation is in git
+  history up to 2.18; `ScreenText` still has its tested parsing helpers (leadingTime, transcriptSegments, formatComment).
 - `data/Rates.kt` — NT Media per-model usage multipliers (from its price list; its API doesn't expose
   them). `ReplyUsage.multiplier`/`billed` = tokens × multiplier, shown in chat, usage dialog/screen, model menu.
 - `data/Settings.kt` — `AppSettings` (saved API profiles, search engine/keys), stored as one AES-GCM

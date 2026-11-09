@@ -76,11 +76,6 @@ object ScreenText {
             "Pocket AI button again.]"
 
     /** For when the app found the video on YouTube by its title. */
-    fun youTubeLinkNote(link: String) =
-        "[Pocket AI: this is the YouTube app; the video on screen is $link. If the user asks what the video says (a " +
-            "summary, the transcript, details), call fetch_url on that link: it returns the video's details and its " +
-            "transcript. Don't search news sites about it instead.]"
-
     private val AUTHOR = Regex("""^@[\w.\-]{2,}""")
     private val LIKES_LABEL = Regex("""(?i)like this comment along with ([\d,.]+\s*[kmb]?) other (?:people|person)""")
     private val REPLIES = Regex("""(?i)^(?:view\s+)?([\d,.]+\s*[kmb]?)\s+repl(?:y|ies)$""")
@@ -121,23 +116,11 @@ object ScreenText {
         return "[${likes ?: "0"} likes] $body" + (replies?.let { " ($it replies)" } ?: "")
     }
 
-    const val YOUTUBE_COMMENTS_NOTE =
-        "[Pocket AI: these are the video's top comments from the YouTube app, most-liked first. When summarizing them, " +
-            "cover what people think, the way you'd tell a friend: the overall mood and the main reactions, including " +
-            "disagreement. Likes show what's popular; no need to quote the numbers. Commenters' claims are claims, not facts.]"
-
     /** YouTube's comments panel was open but the app didn't expose the comments' text (only buttons and counts). */
     const val YOUTUBE_COMMENTS_HIDDEN_NOTE =
-        "[Pocket AI: the YouTube app's comments panel is open, but the app doesn't share the comments' text with " +
-            "Pocket AI (only buttons and like counts). Say so in one short line instead of guessing what people wrote.]"
-
-    /** When only part of the transcript could be read from the YouTube app. */
-    fun youTubePartialNote(link: String?) =
-        "[Pocket AI: the transcript below is incomplete; only part of it could be read from the YouTube app. " +
-            (if (link != null) "Before answering, call fetch_url on $link to get the whole transcript. "
-            else "Before answering, get the whole transcript: call fetch_url on https://www.youtube.com/results?search_query= " +
-                "followed by the video's title from the screen, then on the matching video's link. ") +
-            "Don't search news sites to fill the gaps.]"
+        "[Pocket AI: the YouTube app's comments panel is open, but Pocket AI can't read YouTube comments: the app hides " +
+            "their text, and the video's link gives only its details and transcript. If asked about the comments, say so " +
+            "in one short line; don't guess what people wrote and don't offer to read them from a link.]"
 
     private val CLOCK = Regex("""((?:\d{1,2}:)?\d{1,2}:\d{2})\s*/\s*((?:\d{1,2}:)?\d{1,2}:\d{2})""")
     private val SPOKEN_LENGTH = Regex("""(?i)\bof\s+((?:\d+\s*hours?,?\s*)?(?:\d+\s*minutes?,?\s*)?(?:\d+\s*seconds?)?)""")

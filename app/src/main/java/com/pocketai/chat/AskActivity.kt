@@ -71,9 +71,12 @@ class AskActivity : ComponentActivity() {
     override fun onStart() {
         super.onStart()
         app.visibleScreens++
+        // The floating button steps aside while the panel is open (it used to cover the panel's ✕).
+        com.pocketai.chat.screen.AskService.instance?.button?.setPanelOpen(true)
     }
 
     override fun onStop() {
+        com.pocketai.chat.screen.AskService.instance?.button?.setPanelOpen(false)
         app.visibleScreens--
         super.onStop()
     }

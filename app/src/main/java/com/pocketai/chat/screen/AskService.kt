@@ -28,8 +28,14 @@ import com.pocketai.chat.PocketApp
 class AskService : AccessibilityService() {
     private var callback: AccessibilityButtonController.AccessibilityButtonCallback? = null
 
+    /** Pocket AI's own floating button (tap to ask, hold to hide). */
+    var button: FloatingButton? = null
+        private set
+
     override fun onServiceConnected() {
         super.onServiceConnected()
+        instance = this
+        button = FloatingButton(this) { askAboutScreen() }.also { it.refresh() }
         val cb = object : AccessibilityButtonController.AccessibilityButtonCallback() {
             override fun onClicked(controller: AccessibilityButtonController) = askAboutScreen()
         }
@@ -41,7 +47,22 @@ class AskService : AccessibilityService() {
 
     override fun onInterrupt() {}
 
+    override fun onConfigurationChanged(newConfig: android.content.res.Configuration) {
+        super.onConfigurationChanged(newConfig)
+        button?.onScreenChanged()
+    }
+
+    override fun onDestroy() {
+        button?.destroy()
+        button = null
+        if (instance === this) instance = null
+        super.onDestroy()
+    }
+
     override fun onUnbind(intent: Intent?): Boolean {
+        button?.destroy()
+        button = null
+        if (instance === this) instance = null
         callback?.let { accessibilityButtonController.unregisterAccessibilityButtonCallback(it) }
         callback = null
         return super.onUnbind(intent)
@@ -641,6 +662,10 @@ class AskService : AccessibilityService() {
     private fun texts(node: AccessibilityNodeInfo): List<String> = Walk(false).also { walk(node, it, false, 0) }.pieces
 
     companion object {
+        /** The running service (null when the Ask Pocket AI shortcut is off), for the button's settings and tile. */
+        @Volatile var instance: AskService? = null
+            private set
+
         /** YouTube comments read per tap: plenty to judge what people think, without reading thousands. */
         private const val MAX_COMMENTS = 150
 

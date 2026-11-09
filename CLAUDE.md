@@ -143,6 +143,13 @@ Emulator: any image works again (no native code since 2.2).
   (`ScreenText.REDDIT_APP`): `redditTitleCandidates` + the "r/sub" line → `WebTools.findRedditThread` (Reddit
   search.json in the subreddit, then site-wide; `PageText.sameTitle` = longest shared run) → `fetch(link)` like a
   shared link; the capture text is that thread (with `Reddit.GUIDE`) plus the screen.
+  2.16 (owner: "make it easier to hide it, hold down to hide"): Android's accessibility button can't be customised,
+  so `screen/FloatingButton.kt` draws our own bubble as a `TYPE_ACCESSIBILITY_OVERLAY` window from the service (no
+  overlay permission): tap = ask, drag = move + snap to edge (`ui` prefs floatingButtonX/Y), hold = menu (hide 1 hour
+  / until turned back on / cancel). Hidden while AskActivity is visible. On/off: Settings switch, Quick Settings tile
+  `screen/ButtonTile.kt` (StatusBarManager.requestAddTileService on API 33+). The service keeps
+  `flagRequestAccessibilityButton` (it's what keeps the service enabled), so the system button stays unless the owner
+  switches its Location to "Swipe up with 2 fingers" (tip in Settings).
 - `data/Rates.kt` — NT Media per-model usage multipliers (from its price list; its API doesn't expose
   them). `ReplyUsage.multiplier`/`billed` = tokens × multiplier, shown in chat, usage dialog/screen, model menu.
 - `data/Settings.kt` — `AppSettings` (saved API profiles, search engine/keys), stored as one AES-GCM

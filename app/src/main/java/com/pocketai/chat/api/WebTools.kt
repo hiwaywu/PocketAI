@@ -431,7 +431,8 @@ return JSON.stringify({u:location.href.slice(0,90),t:(document.title||'').slice(
     private fun youtubeGuide(id: String) =
         "[Pocket AI: this is a YouTube video's details and, when available, its transcript. Summarize what the video " +
             "actually says, not just its topic. When you mention a moment in it, link the time to that spot, like " +
-            "[4:05](https://youtu.be/$id?t=245).]"
+            "[4:05](https://youtu.be/$id?t=245). The video's comments aren't included: Pocket AI can't read YouTube " +
+            "comments, so don't offer to.]"
 
     private class VideoInfo(
         val title: String, val channel: String, val seconds: Long, val description: String,

@@ -64,10 +64,12 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -95,6 +97,7 @@ fun AskPanel(
 ) {
     val state by vm.state.collectAsStateWithLifecycle()
     val context = LocalContext.current
+    val clipboard = LocalClipboardManager.current
     val speaker = (context.applicationContext as PocketApp).speaker
     val speaking by speaker.speaking.collectAsStateWithLifecycle()
     val keyboard = LocalSoftwareKeyboardController.current
@@ -192,6 +195,9 @@ fun AskPanel(
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(horizontal = 20.dp, vertical = 6.dp),
                     )
+                    if (capture?.debug != null) TextButton(onClick = { preview = true }, modifier = Modifier.padding(horizontal = 8.dp)) {
+                        Text("Details")
+                    }
                 }
 
                 // A new page started a new chat; one tap goes back to the previous one if they're related after all.
@@ -301,6 +307,13 @@ fun AskPanel(
                 }
             },
             confirmButton = { TextButton(onClick = { preview = false }) { Text("OK") } },
+            dismissButton = {
+                // A technical report to paste to whoever is fixing Pocket AI (no keys or settings in it).
+                if (capture.debug != null) TextButton(onClick = {
+                    clipboard.setText(AnnotatedString(diagnostics(capture)))
+                    Toast.makeText(context, "Details copied", Toast.LENGTH_SHORT).show()
+                }) { Text("Copy details") }
+            },
         )
     }
 }
@@ -318,3 +331,8 @@ private fun panelSuggestions(c: ScreenCapture?): List<String> {
         else -> listOf("Summarize this", "Explain this", "Is this reliable?")
     }
 }
+
+/** "Copy details": the version, the reading report and the start of what was read. */
+private fun diagnostics(c: ScreenCapture): String =
+    "Pocket AI ${com.pocketai.chat.BuildConfig.VERSION_NAME} · ${c.appName} (${c.packageName}) · ${c.text.length} chars read\n" +
+        "${c.debug}\n--- start of text ---\n${c.text.take(600)}"

@@ -114,6 +114,11 @@ object ScreenText {
             "cover what people think, the way you'd tell a friend: the overall mood and the main reactions, including " +
             "disagreement. Likes show what's popular; no need to quote the numbers. Commenters' claims are claims, not facts.]"
 
+    /** YouTube's comments panel was open but the app didn't expose the comments' text (only buttons and counts). */
+    const val YOUTUBE_COMMENTS_HIDDEN_NOTE =
+        "[Pocket AI: the YouTube app's comments panel is open, but the app doesn't share the comments' text with " +
+            "Pocket AI (only buttons and like counts). Say so in one short line instead of guessing what people wrote.]"
+
     /** When only part of the transcript could be read from the YouTube app. */
     fun youTubePartialNote(link: String?) =
         "[Pocket AI: the transcript below is incomplete; only part of it could be read from the YouTube app. " +

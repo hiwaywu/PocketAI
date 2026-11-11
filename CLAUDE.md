@@ -182,6 +182,11 @@ Emulator: any image works again (no native code since 2.2).
   calendar cards have Undo (`ChatViewModel.undoPhoneAction`). Setting "Phone actions" (`AppSettings.phoneTools`).
   The model gets no clock time (caching), so the tools take `in_minutes` and results state the current time.
   Untested on a device.
+- `screen/ScreenOcr.kt` (2.20 test): when a screen gives <150 weighted chars to accessibility (the Reddit app gave
+  0 on the Fold in 2.15–2.19), the button screenshots the app's window (`takeScreenshotOfWindow`, API 34+;
+  `canTakeScreenshot` in ask_service.xml) and reads it with ML Kit text recognition (Play services' Chinese model,
+  also reads English; `com.google.mlkit.vision.DEPENDENCIES=ocr_chinese`). The OCR blocks replace the pieces, so the
+  Reddit-app path (title → whole thread) still runs. Logged as "ocr: …" in Details. Untested on a device.
 - `data/Rates.kt` — NT Media per-model usage multipliers (from its price list; its API doesn't expose
   them). `ReplyUsage.multiplier`/`billed` = tokens × multiplier, shown in chat, usage dialog/screen, model menu.
 - `data/Settings.kt` — `AppSettings` (saved API profiles, search engine/keys), stored as one AES-GCM

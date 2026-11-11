@@ -85,6 +85,9 @@ dependencies {
     implementation("net.dankito.readability4j:readability4j:1.0.8")
     // Links open in a Chrome Custom Tab on top of the chat (the built-in browser was removed in 2.2).
     implementation("androidx.browser:browser:1.10.0")
+    // Reads text from a screenshot when an app hides it from the button (2.20). Uses Google Play services' own
+    // model (Chinese + English), so the APK barely grows.
+    implementation("com.google.android.gms:play-services-mlkit-text-recognition-chinese:16.0.2")
 
     testImplementation("junit:junit:4.13.2")
 }

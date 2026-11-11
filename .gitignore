@@ -11,3 +11,4 @@ mock_requests.log
 keystore.properties
 *.jks
 *.keystore
+PocketAI-Test-*.apk

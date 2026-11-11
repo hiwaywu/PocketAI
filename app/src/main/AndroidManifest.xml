@@ -114,6 +114,11 @@
             android:exported="false"
             android:foregroundServiceType="dataSync" />
 
+        <!-- Have Play services download the text-recognition model at install, not on the first button tap. -->
+        <meta-data
+            android:name="com.google.mlkit.vision.DEPENDENCIES"
+            android:value="ocr_chinese" />
+
         <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="${applicationId}.fileprovider"

@@ -265,8 +265,10 @@ object Reddit {
             kind = kind,
         )
         val tree = doc.selectFirst("shreddit-comment-tree")
-        val tops = tree?.children()?.filter { it.tagName() == "shreddit-comment" }
-            ?: doc.select("shreddit-comment[depth=0]").toList()
+        // Comments loaded later (scrolling, "View more comments") sit inside wrapper elements, not directly in the tree.
+        val direct = tree?.children()?.filter { it.tagName() == "shreddit-comment" }.orEmpty()
+        val depth0 = doc.select("shreddit-comment[depth=0]").toList()
+        val tops = if (depth0.size > direct.size) depth0 else direct
         fun conv(el: Element): RedditComment? {
             val body = el.children().firstOrNull { it.attr("slot") == "comment" }?.let { blockText(it) }.orEmpty()
             val replies = el.children().filter { it.tagName() == "shreddit-comment" }.mapNotNull { conv(it) }

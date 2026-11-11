@@ -86,6 +86,22 @@ var ready=!!document.querySelector('ytd-watch-metadata #title,ytd-watch-flexy #d
 return JSON.stringify({u:location.href.slice(0,90),t:(document.title||'').slice(0,60),s:ready?'nobutton':'loading'});
 }catch(e){return JSON.stringify({u:location.href.slice(0,90),t:(document.title||'').slice(0,60),s:'error',e:String(e)});}})()"""
 
+        /**
+         * One step of reading a Reddit thread in the WebView: "wait" until the post is there, then scroll down and tap
+         * "View more comments" (at most 8 rounds) while the number of comments keeps growing; "done" when it stops.
+         */
+        private const val REDDIT_MORE_JS = """(function(){try{
+if(!document.querySelector('shreddit-post'))return 'wait';
+var n=document.querySelectorAll('shreddit-comment').length;
+window.__paR=(window.__paR||0)+1;
+if(window.__paR>8)return 'done';
+window.scrollTo(0,document.body.scrollHeight);
+var b=document.querySelectorAll('button');
+for(var i=0;i<b.length;i++){var t=(b[i].innerText||'').toLowerCase();if(t.indexOf('view more comments')>=0||t.indexOf('more comments')>=0){b[i].click();break;}}
+if(n!==window.__paN){window.__paN=n;window.__paS=0;return 'more';}
+window.__paS=(window.__paS||0)+1;return window.__paS>=3?'done':'more';
+}catch(e){return 'done';}})()"""
+
         val TOOL_DEFS: JsonArray = buildJsonArray {
             addJsonObject {
                 put("type", "function")
@@ -273,8 +289,44 @@ return JSON.stringify({u:location.href.slice(0,90),t:(document.title||'').slice(
     suspend fun fetch(url: String, deepSeekKey: String? = null, onStatus: (String) -> Unit = {}): FetchedPage {
         youtubeId(url)?.let { id -> return youtube(id, url, onStatus) }
         YouTubeSearch.query(url)?.let { q -> return youtubeSearch(q) }
-        if (Reddit.isReddit(url)) attempt { reddit(url, deepSeekKey, onStatus) }?.let { return it }
-        return article(url, deepSeekKey)
+        if (!Reddit.isReddit(url)) return article(url, deepSeekKey)
+        val problem = try {
+            return reddit(url, deepSeekKey, onStatus)
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            e.message ?: e.javaClass.simpleName
+        }
+        // The plain page (rendered if needed). If it ended up on the thread's real address, read that properly.
+        val page = article(url, deepSeekKey)
+        if (Reddit.jsonUrl(page.url) != null && page.url != url) attempt { reddit(page.url, deepSeekKey, onStatus) }?.let { return it }
+        return page.copy(
+            text = "[Pocket AI: its Reddit reader failed ($problem), so this is the thread's web page as shown, with only " +
+                "the first comments and without the linked article. Say so briefly; if the post links to an article, " +
+                "find and read it with web_search and fetch_url.]\n\n" + page.text,
+            detail = "web page only: $problem",
+        )
+    }
+
+    /**
+     * Where a /s/ share link leads (…/comments/<id>/…). Reddit usually answers with a redirect; when it doesn't (another
+     * answer for some apps or phones), follow it like a browser and look for the thread's address in the page.
+     */
+    private fun resolveShareLink(url: String): String {
+        for (ua in listOf(UA, DESKTOP_UA, REDDIT_UA)) {
+            val to = runCatching { resolveRedirect(url, ua) }.getOrNull()
+            if (to != null && Reddit.jsonUrl(to) != null) return to
+        }
+        return runCatching {
+            val req = Request.Builder().url(url).header("User-Agent", DESKTOP_UA).header("Accept-Language", "en-US,en;q=0.9").build()
+            http.newCall(req).execute().use { r ->
+                val final = r.request.url.toString()
+                if (Reddit.jsonUrl(final) != null) return@use final
+                val html = r.body?.string().orEmpty()
+                Regex("""https?://(?:www\.)?reddit\.com/r/[^/"'\s]+/comments/[a-z0-9]+(?:/[^"'\s?#<]*)?""", RegexOption.IGNORE_CASE)
+                    .find(html)?.value ?: url
+            }
+        }.getOrDefault(url)
     }
 
     /** Like runCatching, but pressing Stop (cancellation) still stops the reply. */
@@ -333,23 +385,42 @@ return JSON.stringify({u:location.href.slice(0,90),t:(document.title||'').slice(
 
     // ------------------------------------------------------------------ Reddit
 
-    /** A Reddit thread: the post, what it links to, and the top-voted comments. Null if it couldn't be read. */
-    private suspend fun reddit(url: String, deepSeekKey: String?, onStatus: (String) -> Unit): FetchedPage? {
+    /**
+     * A Reddit thread: the post, what it links to, and the top-voted comments. Throws with the reason when it can't be
+     * read (2.21: all of the owner's shared /s/ links had silently fallen back to the plain web page, which only shows a
+     * few comments and no linked article).
+     */
+    private suspend fun reddit(url: String, deepSeekKey: String?, onStatus: (String) -> Unit): FetchedPage {
         onStatus("Reading the Reddit thread…")
         val thread = withContext(Dispatchers.IO) {
-            val link = if (Reddit.isShortLink(url)) resolveRedirect(url) else url
-            val jsonUrl = Reddit.jsonUrl(link) ?: return@withContext null
-            // 2.20: api.reddit.com serves the same JSON and is a second chance when www refuses; the web page (last
-            // resort) only carries the first few comments.
+            val link = if (Reddit.isShortLink(url)) resolveShareLink(url) else url
+            val jsonUrl = Reddit.jsonUrl(link) ?: throw IOException(
+                if (Reddit.isShortLink(url)) "the share link didn't lead to a thread" else "not a thread link"
+            )
+            // api.reddit.com serves the same JSON and is a second chance when www refuses; the web page (last resort)
+            // only carries the first few comments.
             val apiUrl = jsonUrl.replace("https://www.reddit.com/", "https://api.reddit.com/").replace("/.json?", "?")
+            var refused: String? = null
             val fromJson = listOf(jsonUrl to REDDIT_UA, jsonUrl to UA, apiUrl to REDDIT_UA).firstNotNullOfOrNull { (u, ua) ->
-                runCatching { getText(u, ua, "application/json") }.getOrNull()?.let { Reddit.parse(it) }
+                runCatching { getText(u, ua, "application/json") }
+                    .onFailure { refused = it.message?.substringBefore(" from ") }
+                    .getOrNull()?.let { Reddit.parse(it) }?.also { refused = null }
             }
             val t = fromJson ?: runCatching { getText(link, UA, "text/html") }.getOrNull()?.let { Reddit.parseHtml(it, link) }
-            Triple(t?.copy(singleCommentThread = jsonUrl.contains("context=")), link, fromJson == null)
-        } ?: return null
+            Triple(t?.copy(singleCommentThread = jsonUrl.contains("context=")), link, refused)
+        }.let { (t, link, refused) ->
+            if (t != null) Triple(t, link, refused != null)
+            else {
+                // Nov 2026: Reddit answers plain downloads with a "checking your browser" page (and its JSON with 403),
+                // so open the thread in the hidden WebView like a browser and read the finished page.
+                onStatus("Opening the Reddit thread…")
+                val html = renderRedditHtml(link)
+                val parsed = html?.let { withContext(Dispatchers.Default) { Reddit.parseHtml(it, link) } }
+                    ?: throw IOException("Reddit refused the thread (${refused ?: "unreadable reply"}) and the page didn't load")
+                Triple(parsed, link, true)
+            }
+        }
         val (t, link, fromPage) = thread
-        if (t == null) return null
         val linked = Reddit.articleLink(t.post)?.let { target ->
             onStatus("Reading the linked page: ${hostOf(target)}")
             attempt { fetch(target, deepSeekKey) }
@@ -411,11 +482,11 @@ return JSON.stringify({u:location.href.slice(0,90),t:(document.title||'').slice(
     }
 
     /** Follows a short link's redirects without downloading the page. */
-    private fun resolveRedirect(url: String): String {
+    private fun resolveRedirect(url: String, ua: String = UA): String {
         var current = url
         val noFollow = http.newBuilder().followRedirects(false).followSslRedirects(false).build()
         repeat(5) {
-            val req = Request.Builder().url(current).header("User-Agent", UA).build()
+            val req = Request.Builder().url(current).header("User-Agent", ua).build()
             val next = noFollow.newCall(req).execute().use { r ->
                 if (r.code in 300..399) r.header("Location")?.let { loc -> r.request.url.resolve(loc)?.toString() } else null
             } ?: return current
@@ -651,6 +722,54 @@ return JSON.stringify({u:location.href.slice(0,90),t:(document.title||'').slice(
     }
 
     private fun cleanText(s: String): String = PageText.clean(s, MAX_PAGE_CHARS)
+
+    /**
+     * Opens a Reddit thread in an off-screen WebView (Reddit's browser check passes like in any browser), scrolls down
+     * and taps "View more comments" a few times the way a reader would, and returns the page's HTML once comments stop
+     * growing. Null if the post never appeared.
+     */
+    @SuppressLint("SetJavaScriptEnabled")
+    private suspend fun renderRedditHtml(url: String): String? = withContext(Dispatchers.Main) {
+        withTimeoutOrNull(30_000) {
+            suspendCancellableCoroutine<String?> { cont ->
+                val main = Handler(Looper.getMainLooper())
+                val wv = WebView(appContext)
+                wv.settings.javaScriptEnabled = true
+                wv.settings.domStorageEnabled = true
+                wv.settings.userAgentString = UA
+                wv.layout(0, 0, 1080, 2400)
+                var done = false
+                var polls = 0
+                fun finish(html: String?) {
+                    if (done) return
+                    done = true
+                    wv.destroy()
+                    if (cont.isActive) cont.resume(html)
+                }
+                fun grab() = wv.evaluateJavascript(
+                    "(function(){return document.querySelector('shreddit-post')?document.documentElement.outerHTML.slice(0,4000000):''})()"
+                ) { res -> finish(runCatching { json.decodeFromString<String>(res) }.getOrNull()?.ifBlank { null }) }
+                lateinit var poll: Runnable
+                poll = Runnable {
+                    if (done) return@Runnable
+                    polls++
+                    wv.evaluateJavascript(REDDIT_MORE_JS) { res ->
+                        val state = res?.trim('"').orEmpty()
+                        when {
+                            state == "done" -> grab()
+                            polls >= 34 -> grab()
+                            else -> main.postDelayed(poll, 800)
+                        }
+                    }
+                }
+                wv.webViewClient = WebViewClient()
+                main.postDelayed(poll, 1500)
+                main.postDelayed({ if (!done) grab() }, 28_000)
+                cont.invokeOnCancellation { main.post { if (!done) { done = true; wv.destroy() } } }
+                wv.loadUrl(url)
+            }
+        }
+    }
 
     /**
      * Loads the page in an off-screen WebView so JavaScript runs, then cuts the finished page down to

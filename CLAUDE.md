@@ -260,6 +260,14 @@ Emulator: any image works again (no native code since 2.2).
   the snippet; `Reddit.articleLink` now reads the first article link in a text post's body too. When the article
   can't be opened, the tool result tells the model to web_search the headline and read another outlet's copy (it did
   that on its own when the owner asked "are you reading the article?"), and the chip says "couldn't open <site>".
+- Reddit refusal (found Nov 11 2026 with the owner's /s/ links): /s/ redirects still work (301), but Reddit answers
+  plain downloads of the thread page with a JS "checking your browser" page and its JSON with 403 (from the cloud at
+  least; on the phone the reader evidently failed too: the model said "Reddit served a partial page" — the generic
+  page reader's result — every time). Now `reddit()` throws with a reason instead of returning null; after JSON and
+  HTML fail it opens the thread in a hidden WebView (`renderRedditHtml`: waits for `shreddit-post`, scrolls and taps
+  "View more comments" up to 8 rounds while comments grow, ≤30 s) and parses that with `parseHtml` (depth-0 comments
+  anywhere in the page). If all fails, the generic page goes to the model with a note saying the reader failed and
+  why, and the chip says "web page only: <reason>". Don't solve Reddit's challenge outside a real WebView.
 - 2.6: the owner asked that the AI "follow other instructions similar to you" (Claude). `DEFAULT_SYSTEM_PROMPT` and the
   added language/summary/web rules were rewritten in that plain style: answer first, length matches the question,
   prose over formatting, honest about uncertainty, opinions when asked, no filler or closing offers. Still no

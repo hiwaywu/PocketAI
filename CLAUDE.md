@@ -272,6 +272,12 @@ Emulator: any image works again (no native code since 2.2).
   read (from the web page)" — the downloaded HTML had the post but no comments (they load by JS), and it was accepted.
   Now a downloaded page only counts if it has comments; otherwise the WebView (desktop UA, which has the full comment
   tree) runs and waits up to ~11 s for the first comments before scrolling / "View more comments" (≤10 rounds).
+  Second device test (r/news, 519 comments): post + article read, still 0 comments. Likely Reddit's logged-out limit,
+  so 2.21 adds **Settings → Reddit → Sign in to Reddit** (`ui/RedditSignIn.kt`: Reddit's own login page in a visible
+  WebView; `api/RedditSession` checks/clears the `reddit_session` cookie). The hidden reader shares the app's WebView
+  cookies, so it reads threads as the owner. The chip now says what the browser saw ("browser: 0 comments… comments
+  need a Reddit sign-in / no comments shown / the page didn't load, signed in"), and with 0 comments the model is told
+  to say so in one line (and mention the sign-in if not signed in), not to ask the user to paste comments.
 - 2.6: the owner asked that the AI "follow other instructions similar to you" (Claude). `DEFAULT_SYSTEM_PROMPT` and the
   added language/summary/web rules were rewritten in that plain style: answer first, length matches the question,
   prose over formatting, honest about uncertainty, opinions when asked, no filler or closing offers. Still no

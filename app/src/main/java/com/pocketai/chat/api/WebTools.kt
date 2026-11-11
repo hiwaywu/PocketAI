@@ -86,6 +86,14 @@ var ready=!!document.querySelector('ytd-watch-metadata #title,ytd-watch-flexy #d
 return JSON.stringify({u:location.href.slice(0,90),t:(document.title||'').slice(0,60),s:ready?'nobutton':'loading'});
 }catch(e){return JSON.stringify({u:location.href.slice(0,90),t:(document.title||'').slice(0,60),s:'error',e:String(e)});}})()"""
 
+        /** The finished thread page for [renderRedditHtml]: its HTML, comment count, and whether comments ask for a login. */
+        private const val REDDIT_GRAB_JS = """(function(){try{
+var p=document.querySelector('shreddit-post');
+var txt=(document.body&&document.body.innerText||'').toLowerCase();
+var login=/log ?in to (view|see|read|join)|sign ?in to (view|see|read)|view all comments in the app|continue in app/.test(txt)?'1':'0';
+return JSON.stringify({h:p?document.documentElement.outerHTML.slice(0,4000000):'',n:String(document.querySelectorAll('shreddit-comment').length),login:login,t:document.title||''});
+}catch(e){return JSON.stringify({h:'',n:'0',login:'0',t:String(e)});}})()"""
+
         /**
          * One step of reading a Reddit thread in the WebView: "wait" until the post is there, then scroll down and tap
          * "View more comments" (at most 8 rounds) while the number of comments keeps growing; "done" when it stops.
@@ -394,6 +402,7 @@ window.__paS=(window.__paS||0)+1;return window.__paS>=3?'done':'more';
      */
     private suspend fun reddit(url: String, deepSeekKey: String?, onStatus: (String) -> Unit): FetchedPage {
         onStatus("Reading the Reddit thread…")
+        var browserNote: String? = null
         val thread = withContext(Dispatchers.IO) {
             val link = if (Reddit.isShortLink(url)) resolveShareLink(url) else url
             val jsonUrl = Reddit.jsonUrl(link) ?: throw IOException(
@@ -421,10 +430,11 @@ window.__paS=(window.__paS||0)+1;return window.__paS>=3?'done':'more';
                 // Nov 2026: Reddit answers plain downloads with a "checking your browser" page (and its JSON with 403),
                 // so open the thread in the hidden WebView like a browser and read the finished page.
                 onStatus("Opening the Reddit thread…")
-                val html = renderRedditHtml(link)
-                val parsed = html?.let { withContext(Dispatchers.Default) { Reddit.parseHtml(it, link) } }
+                val rendered = renderRedditHtml(link)
+                browserNote = rendered.note
+                val parsed = rendered.html?.let { withContext(Dispatchers.Default) { Reddit.parseHtml(it, link) } }
                 val best = listOfNotNull(parsed, t).maxByOrNull { it.comments.size }
-                    ?: throw IOException("Reddit refused the thread (${refused ?: "unreadable reply"}) and the page didn't load")
+                    ?: throw IOException("Reddit refused the thread (${refused ?: "unreadable reply"}) and ${rendered.note}")
                 Triple(best.copy(singleCommentThread = t?.singleCommentThread ?: false), link, true)
             }
         }
@@ -436,9 +446,17 @@ window.__paS=(window.__paS||0)+1;return window.__paS>=3?'done':'more';
         val title = t.post.title + if (t.post.subreddit.isNotBlank()) " : ${t.post.subreddit}" else ""
         fun count(cs: List<RedditComment>): Int = cs.sumOf { 1 + count(it.replies) }
         val n = count(t.comments)
-        val detail = (if (n == 0) "no comments read" else "$n comments") + (if (fromPage) " (from the web page)" else "") +
+        val signedIn = RedditSession.signedIn()
+        val detail = (if (n == 0) "no comments read" else "$n comments") +
+            (if (fromPage) " (browser: ${browserNote ?: "web page"}${if (signedIn) ", signed in" else ""})" else "") +
             (if (linked != null) " + ${hostOf(linked.url)}" else Reddit.articleLink(t.post)?.let { " (couldn't open ${hostOf(it)})" } ?: "")
-        return FetchedPage(title, link, Reddit.format(t, System.currentTimeMillis(), linked), t.post.images, detail)
+        var text = Reddit.format(t, System.currentTimeMillis(), linked)
+        if (n == 0 && (t.post.numComments ?: 0) > 0) {
+            text += "\n[Pocket AI: the comments couldn't be read (${browserNote ?: "Reddit didn't send them"}). Say so in one " +
+                "line" + (if (!signedIn) " and mention that signing in to Reddit in Pocket AI's Settings → Reddit may let it read them" else "") +
+                "; don't ask the user to paste comments.]"
+        }
+        return FetchedPage(title, link, text, t.post.images, detail)
     }
 
     /**
@@ -737,9 +755,11 @@ window.__paS=(window.__paS||0)+1;return window.__paS>=3?'done':'more';
      * growing. Null if the post never appeared.
      */
     @SuppressLint("SetJavaScriptEnabled")
-    private suspend fun renderRedditHtml(url: String): String? = withContext(Dispatchers.Main) {
+    private class Rendered(val html: String?, val note: String)
+
+    private suspend fun renderRedditHtml(url: String): Rendered = withContext(Dispatchers.Main) {
         withTimeoutOrNull(30_000) {
-            suspendCancellableCoroutine<String?> { cont ->
+            suspendCancellableCoroutine<Rendered> { cont ->
                 val main = Handler(Looper.getMainLooper())
                 val wv = WebView(appContext)
                 wv.settings.javaScriptEnabled = true
@@ -749,15 +769,24 @@ window.__paS=(window.__paS||0)+1;return window.__paS>=3?'done':'more';
                 wv.layout(0, 0, 1280, 2400)
                 var done = false
                 var polls = 0
-                fun finish(html: String?) {
+                fun finish(r: Rendered) {
                     if (done) return
                     done = true
                     wv.destroy()
-                    if (cont.isActive) cont.resume(html)
+                    if (cont.isActive) cont.resume(r)
                 }
-                fun grab() = wv.evaluateJavascript(
-                    "(function(){return document.querySelector('shreddit-post')?document.documentElement.outerHTML.slice(0,4000000):''})()"
-                ) { res -> finish(runCatching { json.decodeFromString<String>(res) }.getOrNull()?.ifBlank { null }) }
+                fun grab() = wv.evaluateJavascript(REDDIT_GRAB_JS) { res ->
+                    val o = runCatching { json.parseToJsonElement(json.decodeFromString<String>(res)).jsonObject }.getOrNull()
+                    val html = o?.str("h")?.ifBlank { null }
+                    val n = o?.str("n")?.toIntOrNull() ?: 0
+                    val note = when {
+                        o == null || html == null -> "the page didn't load (${o?.str("t")?.take(40) ?: "no answer"})"
+                        n > 0 -> "$n comments"
+                        o.str("login") == "1" -> "comments need a Reddit sign-in"
+                        else -> "no comments shown"
+                    }
+                    finish(Rendered(html, note))
+                }
                 lateinit var poll: Runnable
                 poll = Runnable {
                     if (done) return@Runnable
@@ -777,7 +806,7 @@ window.__paS=(window.__paS||0)+1;return window.__paS>=3?'done':'more';
                 cont.invokeOnCancellation { main.post { if (!done) { done = true; wv.destroy() } } }
                 wv.loadUrl(url)
             }
-        }
+        } ?: Rendered(null, "the page didn't load in time")
     }
 
     /**

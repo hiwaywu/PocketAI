@@ -280,6 +280,10 @@ fun SettingsScreen(vm: ChatViewModel, onClose: () -> Unit) {
                 }
 
                 HorizontalDivider(Modifier.padding(vertical = 8.dp))
+                SectionTitle("Reddit")
+                RedditSection()
+
+                HorizontalDivider(Modifier.padding(vertical = 8.dp))
                 SectionTitle("Web tools")
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {

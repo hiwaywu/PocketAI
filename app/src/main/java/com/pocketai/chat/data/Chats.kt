@@ -19,9 +19,13 @@ import kotlin.math.roundToInt
 @Serializable
 data class ToolEvent(
     val id: String = UUID.randomUUID().toString(),
-    val kind: String, // "search" | "fetch"
+    val kind: String, // "search" | "fetch" | phone actions: "alarm" | "timer" | "calendar" | "agenda"
     val label: String,
     val failed: Boolean = false,
+    /** Phone actions: the calendar event id ("calendar") or the first day's time in ms ("agenda"). */
+    val ref: Long? = null,
+    /** A calendar event the user removed again with Undo. */
+    val undone: Boolean = false,
 )
 
 @Serializable

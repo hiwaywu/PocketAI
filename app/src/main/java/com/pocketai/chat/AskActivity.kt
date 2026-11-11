@@ -13,6 +13,7 @@ import androidx.lifecycle.lifecycleScope
 import com.pocketai.chat.screen.SameTopic
 import com.pocketai.chat.screen.ScreenCapture
 import com.pocketai.chat.screen.ScreenText
+import com.pocketai.chat.phone.PermissionRequester
 import com.pocketai.chat.ui.AppTheme
 import com.pocketai.chat.ui.AskPanel
 
@@ -35,6 +36,7 @@ class AskActivity : ComponentActivity() {
         take(intent)
         setContent {
             AppTheme {
+                PermissionRequester()
                 AskPanel(
                     vm = app.chat,
                     capture = capture,

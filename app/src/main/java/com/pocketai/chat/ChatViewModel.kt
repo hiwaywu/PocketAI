@@ -24,6 +24,7 @@ import com.pocketai.chat.data.Source
 import com.pocketai.chat.data.ToolEvent
 import com.pocketai.chat.data.hostOf
 import com.pocketai.chat.data.normalizeBaseUrl
+import com.pocketai.chat.phone.PhoneTools
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -41,6 +42,7 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.addJsonObject
+import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.put
@@ -84,6 +86,7 @@ class ChatViewModel(private val app: Application) : AndroidViewModel(app) {
     /** Pocket AI identifies itself honestly (OpenCode asks clients to send their own app name). */
     private val api = ChatClient(http, "PocketAI/${BuildConfig.VERSION_NAME} (Android)")
     private val web = WebTools(http, app)
+    private val phone = PhoneTools(app)
     private val repo = ChatRepository(app)
     private val store = SettingsStore(app)
 
@@ -111,12 +114,31 @@ class ChatViewModel(private val app: Application) : AndroidViewModel(app) {
     }
 
     /** Saves the non-connection settings (prompt, web tools, search). */
-    fun saveGeneral(systemPrompt: String, webTools: Boolean, engine: com.pocketai.chat.data.SearchEngine, searchKeys: Map<String, String>) {
+    fun saveGeneral(
+        systemPrompt: String, webTools: Boolean, engine: com.pocketai.chat.data.SearchEngine, searchKeys: Map<String, String>,
+        phoneTools: Boolean,
+    ) {
         setSettings(
             state.value.settings.copy(
                 systemPrompt = systemPrompt, webTools = webTools, searchEngine = engine, searchKeys = searchKeys,
+                phoneTools = phoneTools,
             )
         )
+    }
+
+    /** Undo on a calendar card: removes the event this chat added. */
+    fun undoPhoneAction(convId: String, msgId: String, ev: ToolEvent) {
+        if (ev.kind != "calendar" || ev.undone) return
+        val id = ev.ref ?: return
+        viewModelScope.launch(Dispatchers.IO) {
+            if (phone.deleteEvent(id)) {
+                updateMsg(convId, msgId) { m -> m.copy(toolEvents = m.toolEvents.map { if (it.id == ev.id) it.copy(undone = true) else it }) }
+                persist(convId)
+                notice("Removed from your calendar")
+            } else {
+                notice("Couldn't remove it (it may already be deleted)")
+            }
+        }
     }
 
     /** Makes this address/key/model the one chats use, without saving it as a named API. */
@@ -541,7 +563,12 @@ class ChatViewModel(private val app: Application) : AndroidViewModel(app) {
     private suspend fun agentLoop(convId: String, msgId: String, history: BuiltHistory, s: AppSettings) {
         val trail = mutableListOf<JsonObject>()
         val sources = mutableListOf<Source>()
-        var useTools = s.webTools
+        var useTools = s.webTools || s.phoneTools
+        val toolDefs = buildJsonArray {
+            if (s.webTools) WebTools.TOOL_DEFS.forEach { add(it) }
+            if (s.phoneTools) PhoneTools.TOOL_DEFS.forEach { add(it) }
+        }
+        val toolDefTokens = toolDefs.toString().length / 4
         var includeUsage = s.baseUrl !in s.noStreamUsage
         var round = 0
         var finalContent = ""
@@ -576,7 +603,7 @@ class ChatViewModel(private val app: Application) : AndroidViewModel(app) {
                         put("content", "[Pocket AI: you've used all your web steps for this answer. Answer now with what you have; don't call any tools.]")
                     }
                 }
-                if (allowTools) put("tools", WebTools.TOOL_DEFS)
+                if (allowTools) put("tools", toolDefs)
             }
             if (round > 1) setStatus(convId, "Reading results…")
 
@@ -593,7 +620,7 @@ class ChatViewModel(private val app: Application) : AndroidViewModel(app) {
                 }
                 if (allowTools && trail.isEmpty() && e.code in 400..422 && (msg.contains("tool", true) || msg.contains("function", true))) {
                     useTools = false
-                    notice("This model can't use web tools, so it's answering without them.")
+                    notice("This model can't use tools, so it's answering without them.")
                     round--
                     continue
                 }
@@ -603,7 +630,7 @@ class ChatViewModel(private val app: Application) : AndroidViewModel(app) {
             output += res.completionTokens
             cached += res.cachedTokens
             outputChars += res.content.length + res.toolCalls.sumOf { it.arguments.length }
-            estHistory += history.textChars / 4 + (if (allowTools) TOOL_DEF_TOKENS else 0)
+            estHistory += history.textChars / 4 + (if (allowTools) toolDefTokens else 0)
             estShared += history.sharedChars / 4
             estPhotos += history.images * PHOTO_TOKENS
             estWeb += (history.webChars + trail.sumOf { it.toString().length }) / 4
@@ -756,6 +783,12 @@ class ChatViewModel(private val app: Application) : AndroidViewModel(app) {
                     "Could not open $url: ${e.message}"
                 }
             }
+            in PhoneTools.NAMES -> {
+                setStatus(convId, if (tc.name == "list_calendar_events") "Checking your calendar…" else "Working on your phone…")
+                val out = withContext(Dispatchers.IO) { phone.run(tc.name, args) { (app as PocketApp).visible } }
+                out.event?.let { ev -> updateMsg(convId, msgId) { it.copy(toolEvents = it.toolEvents + ev) } }
+                out.text
+            }
             else -> "Error: unknown tool ${tc.name}."
         }
     }
@@ -826,6 +859,7 @@ class ChatViewModel(private val app: Application) : AndroidViewModel(app) {
                 "dates disagree with your memory, trust the newest. Pages the user shares are snapshots and may be out " +
                 "of date too. Cite what you use as Markdown links. Just call the tools; don't announce them first."
         }
+        if (s.phoneTools) system += PhoneTools.PROMPT
         out += buildJsonObject { put("role", "system"); put("content", system) }
         textChars += system.length
 
@@ -910,7 +944,6 @@ class ChatViewModel(private val app: Application) : AndroidViewModel(app) {
         /** Photos and shared pages are re-sent only for this many of the latest user messages. */
         const val KEEP_MEDIA_TURNS = 4
         private const val PHOTO_TOKENS = 1200L
-        private const val TOOL_DEF_TOKENS = 250
         /** Waits before re-sending a step after the connection dropped. */
         private val NET_RETRY_DELAYS = longArrayOf(2_000, 5_000, 10_000)
         private val RETRY_HTTP_CODES = setOf(408, 500, 502, 503, 504, 520, 522, 524, 529)

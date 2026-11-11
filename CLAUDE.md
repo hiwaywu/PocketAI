@@ -27,6 +27,10 @@ Owner's main provider is now NT Media (`https://api.ntmedia.store`, used ~99% of
   .jks and password; until they add them as the secrets `POCKETAI_KEYSTORE_BASE64` / `POCKETAI_KEYSTORE_PASSWORD`
   (sessions can't set secrets), the Release APK workflow can't sign. Never make yet another key without asking:
   every new key forces a reinstall that wipes chats.
+- Test builds: `./gradlew assemblePreview` → `app/build/outputs/apk/preview/app-preview.apk`, "Pocket AI Test"
+  (`com.pocketai.chat.test`, debug key): installs next to the real app with its own chats/settings, so feature
+  branches can be tried on the Fold without risking chats. A build from another container has another debug key,
+  so the test app may need uninstalling first.
 - Releases: bump `versionCode`/`versionName` in `app/build.gradle.kts`, write `release-notes/v<version>.md`,
   merge to `main`, then run the **Release APK** workflow (`.github/workflows/release.yml`, workflow_dispatch
   with input `version`). It builds the APK with the release key and creates the GitHub release.
@@ -168,6 +172,16 @@ Emulator: any image works again (no native code since 2.2).
   panel no longer suggests "What do the comments say?". If comments are wanted again: YouTube Data API
   `commentThreads.list` with a free Google API key (offered to the owner, not built). The old automation is in git
   history up to 2.18; `ScreenText` still has its tested parsing helpers (leadingTime, transcriptSegments, formatComment).
+- `phone/PhoneTools.kt` (2.20, on a test branch first): tools `set_alarm` / `set_timer` (Clock app via
+  `AlarmClock` intents with `EXTRA_SKIP_UI`, SET_ALARM permission, no prompt; Android blocks opening another app
+  from the background, so then a "Tap to set alarm" notification is posted instead) and `add_calendar_event` /
+  `list_calendar_events` (CalendarContract; writes to the Google account's primary calendar, default reminder 30 min;
+  reads `Instances` so repeating events show). READ/WRITE_CALENDAR is asked mid-reply through
+  `phone/PhonePermissions.kt` (`PermissionRequester()` in both activities; refused when no Pocket AI screen is
+  visible). Each action is a `ToolEvent` card (kinds alarm/timer/calendar/agenda): tap opens Clock/Calendar,
+  calendar cards have Undo (`ChatViewModel.undoPhoneAction`). Setting "Phone actions" (`AppSettings.phoneTools`).
+  The model gets no clock time (caching), so the tools take `in_minutes` and results state the current time.
+  Untested on a device.
 - `data/Rates.kt` — NT Media per-model usage multipliers (from its price list; its API doesn't expose
   them). `ReplyUsage.multiplier`/`billed` = tokens × multiplier, shown in chat, usage dialog/screen, model menu.
 - `data/Settings.kt` — `AppSettings` (saved API profiles, search engine/keys), stored as one AES-GCM

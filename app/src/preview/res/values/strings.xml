@@ -1,0 +1,4 @@
+<resources>
+    <string name="app_name">Pocket AI Test</string>
+    <string name="ask_service_label">Ask Pocket AI Test</string>
+</resources>

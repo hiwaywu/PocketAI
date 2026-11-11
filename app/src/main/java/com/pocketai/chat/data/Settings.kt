@@ -81,6 +81,8 @@ data class AppSettings(
     val activeProfileId: String = "",
     val systemPrompt: String = DEFAULT_SYSTEM_PROMPT,
     val webTools: Boolean = true,
+    /** Alarms, timers and the calendar (2.20). */
+    val phoneTools: Boolean = true,
     val searchEngine: SearchEngine = SearchEngine.DUCKDUCKGO,
     val searchKeys: Map<String, String> = emptyMap(),
     /** Endpoints that rejected `stream_options`; we stop sending it to them. */

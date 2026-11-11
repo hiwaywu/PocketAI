@@ -16,8 +16,8 @@ android {
         applicationId = "com.pocketai.chat"
         minSdk = 26
         targetSdk = 35
-        versionCode = 34
-        versionName = "2.19"
+        versionCode = 35
+        versionName = "2.20"
     }
 
     // One permanent release key so every build can install over the previous version without losing
@@ -43,6 +43,15 @@ android {
             // Without the release key (e.g. a fresh checkout) fall back to the debug key; such an APK
             // can't update an installed Pocket AI, so real releases must use the release key.
             signingConfig = signingConfigs.findByName("pocketai") ?: signingConfigs.getByName("debug")
+        }
+        // Test builds of a feature branch: installs next to the real app as "Pocket AI Test" (own chats and
+        // settings), so trying something new never touches the real app. ./gradlew assemblePreview
+        create("preview") {
+            initWith(getByName("release"))
+            applicationIdSuffix = ".test"
+            versionNameSuffix = "-test"
+            signingConfig = signingConfigs.getByName("debug")
+            matchingFallbacks += "release"
         }
     }
     compileOptions {

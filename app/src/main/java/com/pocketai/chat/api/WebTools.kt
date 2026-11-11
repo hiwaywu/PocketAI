@@ -38,7 +38,11 @@ import kotlin.coroutines.resume
 import kotlin.math.min
 
 data class SearchHit(val title: String, val url: String, val snippet: String)
-data class FetchedPage(val title: String, val url: String, val text: String, val images: List<String> = emptyList())
+data class FetchedPage(
+    val title: String, val url: String, val text: String, val images: List<String> = emptyList(),
+    /** Shown on the chat's "Read:" chip, e.g. "142 comments", so the user can see what was actually read. */
+    val detail: String? = null,
+)
 
 /**
  * The AI's web tools. They run on the phone: the model asks for a search or a page,
@@ -335,20 +339,27 @@ return JSON.stringify({u:location.href.slice(0,90),t:(document.title||'').slice(
         val thread = withContext(Dispatchers.IO) {
             val link = if (Reddit.isShortLink(url)) resolveRedirect(url) else url
             val jsonUrl = Reddit.jsonUrl(link) ?: return@withContext null
-            val fromJson = listOf(REDDIT_UA, UA).firstNotNullOfOrNull { ua ->
-                runCatching { getText(jsonUrl, ua, "application/json") }.getOrNull()?.let { Reddit.parse(it) }
+            // 2.20: api.reddit.com serves the same JSON and is a second chance when www refuses; the web page (last
+            // resort) only carries the first few comments.
+            val apiUrl = jsonUrl.replace("https://www.reddit.com/", "https://api.reddit.com/").replace("/.json?", "?")
+            val fromJson = listOf(jsonUrl to REDDIT_UA, jsonUrl to UA, apiUrl to REDDIT_UA).firstNotNullOfOrNull { (u, ua) ->
+                runCatching { getText(u, ua, "application/json") }.getOrNull()?.let { Reddit.parse(it) }
             }
             val t = fromJson ?: runCatching { getText(link, UA, "text/html") }.getOrNull()?.let { Reddit.parseHtml(it, link) }
-            t?.copy(singleCommentThread = jsonUrl.contains("context=")) to link
+            Triple(t?.copy(singleCommentThread = jsonUrl.contains("context=")), link, fromJson == null)
         } ?: return null
-        val (t, link) = thread
+        val (t, link, fromPage) = thread
         if (t == null) return null
         val linked = t.post.linkUrl?.takeIf { Reddit.isReadableLink(it) }?.let { target ->
             onStatus("Reading the linked page: ${hostOf(target)}")
             attempt { fetch(target, deepSeekKey) }
         }
         val title = t.post.title + if (t.post.subreddit.isNotBlank()) " : ${t.post.subreddit}" else ""
-        return FetchedPage(title, link, Reddit.format(t, System.currentTimeMillis(), linked), t.post.images)
+        fun count(cs: List<RedditComment>): Int = cs.sumOf { 1 + count(it.replies) }
+        val n = count(t.comments)
+        val detail = (if (n == 0) "no comments read" else "$n comments") + (if (fromPage) " (from the web page)" else "") +
+            (if (linked != null) " + ${hostOf(linked.url)}" else "")
+        return FetchedPage(title, link, Reddit.format(t, System.currentTimeMillis(), linked), t.post.images, detail)
     }
 
     /**

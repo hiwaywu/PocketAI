@@ -824,6 +824,9 @@ class ChatViewModel(private val app: Application) : AndroidViewModel(app) {
                     val page = web.fetch(url, s.deepSeekKey.takeIf { s.searchEngine == SearchEngine.DEEPSEEK }) { setStatus(convId, it) }
                     sources += Source(page.title, page.url)
                     synchronized(pictures) { pictures += page.images }
+                    page.detail?.let { d ->
+                        updateMsg(convId, msgId) { m -> m.copy(toolEvents = m.toolEvents.map { if (it.id == ev.id) it.copy(label = "${ev.label} · $d") else it }) }
+                    }
                     nameAfterPage(convId, page.title)
                     "Title: ${page.title}\nURL: ${page.url}\n\n${page.text}"
                 } catch (e: CancellationException) {

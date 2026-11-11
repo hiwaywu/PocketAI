@@ -75,7 +75,7 @@ Emulator: any image works again (no native code since 2.2).
   app UA `android:com.pocketai.chat:<ver> (Pocket AI)` first, browser UA second), else the shreddit HTML
   (`<shreddit-post>/<shreddit-comment>`); `/s/` share links are resolved with redirects off. Output: post stats
   (score, % upvoted, comments, flair, age), media type, the linked article read through `fetch` (8k chars), then
-  ~14k chars of top comments with ↳ replies, upvotes, OP and flair marks (no usernames; AutoModerator/stickied
+  ~24k chars of top comments (14k until 2.20) with ↳ replies, upvotes, OP and flair marks (no usernames; AutoModerator/stickied
   dropped), led by `Reddit.GUIDE` (how to summarize a thread). Reddit and YouTube refuse cloud IPs (403 / Google
   "sorry" page), so these were tested with fixtures only; old.reddit.com now redirects logged-out users to login.
 - YouTube: metadata from `ytInitialPlayerResponse`; caption URLs usually return nothing (YouTube needs a PO token),
@@ -172,6 +172,8 @@ Emulator: any image works again (no native code since 2.2).
   panel no longer suggests "What do the comments say?". If comments are wanted again: YouTube Data API
   `commentThreads.list` with a free Google API key (offered to the owner, not built). The old automation is in git
   history up to 2.18; `ScreenText` still has its tested parsing helpers (leadingTime, transcriptSegments, formatComment).
+  **Nov 11 2026, owner: give up on screen reading for YouTube and Reddit** — Share → Pocket AI works much better
+  (whole transcript / thread). Don't spend more work on the button's YouTube/Reddit paths; improve the link readers.
 - `phone/PhoneTools.kt` (2.20, on a test branch first): tools `set_alarm` / `set_timer` (Clock app via
   `AlarmClock` intents with `EXTRA_SKIP_UI`, SET_ALARM permission, no prompt; Android blocks opening another app
   from the background, so then a "Tap to set alarm" notification is posted instead) and `add_calendar_event` /
@@ -247,6 +249,13 @@ Emulator: any image works again (no native code since 2.2).
   user message with them to the tool trail (marked `_pocketai_pictures`, stripped before sending). A 400 while
   pictures are in the trail drops them and retries. The saved trail keeps only a text note, so chat files and later
   requests don't carry the images.
+- Reddit comments (2.21): the owner found summaries of shared threads covered the article but hardly the comments.
+  The "Read:" chip now shows what was read ("142 comments + gothamist.com", or "no comments read", "(from the web
+  page)" when JSON failed and only the shreddit HTML's first comments came through) — ask for a screenshot of it to
+  tell a reading problem from a model problem. JSON tries www (app UA, browser UA) then api.reddit.com. The guide
+  says to give the comments at least as much room as the article. Comment budget 14k → 24k chars. After the owner
+  pasted the right summary, it did cover the thread well (top views, counter-arguments, quotes); the complaint left
+  was "only a slice of the comments", hence the bigger budget.
 - 2.6: the owner asked that the AI "follow other instructions similar to you" (Claude). `DEFAULT_SYSTEM_PROMPT` and the
   added language/summary/web rules were rewritten in that plain style: answer first, length matches the question,
   prose over formatting, honest about uncertainty, opinions when asked, no filler or closing offers. Still no

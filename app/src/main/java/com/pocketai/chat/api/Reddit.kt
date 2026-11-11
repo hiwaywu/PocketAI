@@ -66,8 +66,11 @@ object Reddit {
     private val HOST = Regex("""^https?://([a-z0-9-]+\.)*(reddit\.com|redd\.it)(/|$)""", RegexOption.IGNORE_CASE)
     private const val QUERY = "sort=top&limit=200&depth=5&raw_json=1"
 
-    /** Characters of comments sent to the AI (about 3,500 tokens): enough to judge the mood of a big thread. */
-    const val COMMENT_BUDGET = 14_000
+    /**
+     * Characters of comments sent to the AI (about 6,000 tokens). 2.21: was 14,000; on a 600-comment r/FoodNYC thread the
+     * AI said it had only "a slice" of the comments, and comments are what the owner wants from a thread.
+     */
+    const val COMMENT_BUDGET = 24_000
     /** Characters of the article a link post points to. */
     const val LINKED_BUDGET = 8_000
 
@@ -286,7 +289,9 @@ object Reddit {
             "summarize it in two parts. First, what it's about: what the poster shared or asked, and the substance of " +
             "the linked article or what the picture shows, with the real details. Then what people are saying: the " +
             "main reactions and answers, most upvoted first, the arguments and disagreements, corrections, and the " +
-            "funny or sharp comments worth knowing, so the user gets the feel of the thread without reading it. If the " +
+            "funny or sharp comments worth knowing, so the user gets the feel of the thread without reading it. Give the " +
+            "comments at least as much room as the article: the user can read the article, the thread is what they " +
+            "want summarized. If the " +
             "post asks a question, say what the answer turned out to be and how sure people are. Upvotes show what's " +
             "popular; no need to quote the numbers. Commenters' claims are claims, not facts. Don't repeat private " +
             "people's names or personal details that commenters dug up, unless news outlets already reported them.]"

@@ -45,6 +45,8 @@ data class RedditPost(
     val poll: List<Pair<String, Int?>> = emptyList(),
     val crosspostFrom: String? = null,
     val nsfw: Boolean = false,
+    /** The post's picture(s) (image, gallery, or a video's preview frame), shown to the AI when it can see images. */
+    val images: List<String> = emptyList(),
 )
 
 data class RedditThread(
@@ -103,6 +105,8 @@ object Reddit {
         return MEDIA_EXT.none { path.endsWith(it) }
     }
 
+    /** Pictures from one post shown to the AI (each costs about a thousand tokens). */
+    const val MAX_IMAGES = 3
     private val MEDIA_EXT = listOf(".jpg", ".jpeg", ".png", ".gif", ".gifv", ".webp", ".mp4", ".webm", ".mov", ".mp3", ".pdf")
 
     /** Reddit's search (JSON), to find a thread seen in the Reddit app by its title. */
@@ -159,7 +163,21 @@ object Reddit {
             c.b("is_self") == true || url == null || isReddit(url) && url.contains("/comments/") && parent == null -> kind = "text"
             else -> { kind = if (hint == "rich:video") "video link" else "link"; linkUrl = url }
         }
+        // 2.20: "what is it" posts are all about the picture, which the AI couldn't see.
+        val preview = ((((c["preview"] as? JsonObject)?.get("images") as? JsonArray)?.firstOrNull() as? JsonObject)
+            ?.get("source") as? JsonObject)?.s("url")
+        val gallery = ((c["gallery_data"] as? JsonObject)?.get("items") as? JsonArray).orEmpty().mapNotNull { item ->
+            val id = (item as? JsonObject)?.s("media_id") ?: return@mapNotNull null
+            (((c["media_metadata"] as? JsonObject)?.get(id) as? JsonObject)?.get("s") as? JsonObject)?.s("u")
+        }
+        val images = when (kind) {
+            "image" -> listOfNotNull(url?.takeIf { u -> MEDIA_EXT.take(5).any { u.lowercase().substringBefore('?').endsWith(it) } } ?: preview)
+            "gallery" -> gallery
+            "video", "text" -> listOfNotNull(preview)
+            else -> emptyList()
+        }.map { it.replace("&amp;", "&") }.distinct().take(MAX_IMAGES)
         return RedditPost(
+            images = images,
             subreddit = d.s("subreddit_name_prefixed") ?: d.s("subreddit")?.let { "r/$it" }.orEmpty(),
             title = d.s("title").orEmpty(),
             author = d.s("author").orEmpty(),
@@ -258,13 +276,20 @@ object Reddit {
 
     // ------------------------------------------------------------------ what the AI gets
 
-    /** How to summarize a thread; sent with the thread only, so ordinary chats don't pay for it. */
+    /**
+     * How to summarize a thread; sent with the thread only, so ordinary chats don't pay for it. 2.20: the owner found
+     * summaries thin ("tell me what it was about and what people are saying"), so the two parts are spelled out.
+     */
     const val GUIDE =
-        "[Pocket AI: this is a Reddit thread: the post, the page it links to (if any) and the top-voted comments with " +
-            "their upvotes. When summarizing, cover what the post is and what people in the comments think, the way " +
-            "you'd naturally tell a friend about a thread. Upvotes show what's popular; no need to quote the numbers. " +
-            "Commenters' claims are claims, not facts. Don't repeat private people's names or personal details that " +
-            "commenters dug up, unless news outlets already reported them.]"
+        "[Pocket AI: this is a Reddit thread: the post, the page it links to (if any, read for you), its picture (if " +
+            "you can see it) and the top-voted comments with their upvotes. Unless the user asks for something else, " +
+            "summarize it in two parts. First, what it's about: what the poster shared or asked, and the substance of " +
+            "the linked article or what the picture shows, with the real details. Then what people are saying: the " +
+            "main reactions and answers, most upvoted first, the arguments and disagreements, corrections, and the " +
+            "funny or sharp comments worth knowing, so the user gets the feel of the thread without reading it. If the " +
+            "post asks a question, say what the answer turned out to be and how sure people are. Upvotes show what's " +
+            "popular; no need to quote the numbers. Commenters' claims are claims, not facts. Don't repeat private " +
+            "people's names or personal details that commenters dug up, unless news outlets already reported them.]"
 
     fun format(t: RedditThread, nowMs: Long, linked: FetchedPage?): String = buildString {
         val p = t.post
@@ -283,9 +308,9 @@ object Reddit {
         }
         if (stats.isNotEmpty()) append("Votes: ${stats.joinToString(" · ")}\n")
         when (p.kind) {
-            "video" -> append("Post type: video${p.mediaNote?.let { " ($it)" } ?: ""}. You can't watch it; go by the title, post text and comments.\n")
-            "image" -> append("Post type: image. You can't see it; go by the title, post text and comments.\n")
-            "gallery" -> append("Post type: image gallery${p.mediaNote?.let { " ($it)" } ?: ""}. You can't see the images; go by the title, post text and comments.\n")
+            "video" -> append("Post type: video${p.mediaNote?.let { " ($it)" } ?: ""}. You can't watch it (a still from it may follow this result); go by the title, post text and comments.\n")
+            "image" -> append("Post type: image. The picture follows this result if you can see images; describe what it shows. Otherwise go by the title, post text and comments.\n")
+            "gallery" -> append("Post type: image gallery${p.mediaNote?.let { " ($it)" } ?: ""}. The first pictures follow this result if you can see images. Otherwise go by the title, post text and comments.\n")
             "link", "video link" -> append("Post type: link to ${p.linkUrl}\n")
             "poll" -> append("Post type: poll\n")
         }

@@ -38,7 +38,7 @@ import kotlin.coroutines.resume
 import kotlin.math.min
 
 data class SearchHit(val title: String, val url: String, val snippet: String)
-data class FetchedPage(val title: String, val url: String, val text: String)
+data class FetchedPage(val title: String, val url: String, val text: String, val images: List<String> = emptyList())
 
 /**
  * The AI's web tools. They run on the phone: the model asks for a search or a page,
@@ -348,7 +348,37 @@ return JSON.stringify({u:location.href.slice(0,90),t:(document.title||'').slice(
             attempt { fetch(target, deepSeekKey) }
         }
         val title = t.post.title + if (t.post.subreddit.isNotBlank()) " : ${t.post.subreddit}" else ""
-        return FetchedPage(title, link, Reddit.format(t, System.currentTimeMillis(), linked))
+        return FetchedPage(title, link, Reddit.format(t, System.currentTimeMillis(), linked), t.post.images)
+    }
+
+    /**
+     * Downloads a picture (a Reddit post's image) for the AI to look at: downscaled to [maxDim] px and sent as a JPEG
+     * data URL, like the user's own photos. Null if it can't be read.
+     */
+    suspend fun imageDataUrl(url: String, maxDim: Int = 1024): String? = withContext(Dispatchers.IO) {
+        runCatching {
+            val bytes = http.newCall(Request.Builder().url(url).header("User-Agent", UA).build()).execute().use { r ->
+                if (!r.isSuccessful) return@runCatching null
+                val body = r.body ?: return@runCatching null
+                if ((body.contentLength()) > 15_000_000) return@runCatching null
+                body.bytes()
+            }
+            val bounds = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
+            if (bounds.outWidth <= 0) return@runCatching null
+            var sample = 1
+            while (maxOf(bounds.outWidth, bounds.outHeight) / (sample * 2) >= maxDim) sample *= 2
+            var bmp = android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size,
+                android.graphics.BitmapFactory.Options().apply { inSampleSize = sample }) ?: return@runCatching null
+            val longest = maxOf(bmp.width, bmp.height)
+            if (longest > maxDim) {
+                val f = maxDim.toFloat() / longest
+                bmp = android.graphics.Bitmap.createScaledBitmap(bmp, (bmp.width * f).toInt().coerceAtLeast(1), (bmp.height * f).toInt().coerceAtLeast(1), true)
+            }
+            val out = java.io.ByteArrayOutputStream()
+            bmp.compress(android.graphics.Bitmap.CompressFormat.JPEG, 82, out)
+            "data:image/jpeg;base64," + android.util.Base64.encodeToString(out.toByteArray(), android.util.Base64.NO_WRAP)
+        }.getOrNull()
     }
 
     /**
@@ -428,11 +458,17 @@ return JSON.stringify({u:location.href.slice(0,90),t:(document.title||'').slice(
         return FetchedPage(info.title, original, text)
     }
 
+    // 2.20: the owner found topic-grouped summaries ("The rumor itself:", "Why it would matter:", "Skepticism:") useless
+    // for videos and asked for the video's own order, the way it was said. Keep it chronological.
     private fun youtubeGuide(id: String) =
-        "[Pocket AI: this is a YouTube video's details and, when available, its transcript. Summarize what the video " +
-            "actually says, not just its topic. When you mention a moment in it, link the time to that spot, like " +
-            "[4:05](https://youtu.be/$id?t=245). The video's comments aren't included: Pocket AI can't read YouTube " +
-            "comments, so don't offer to.]"
+        "[Pocket AI: this is a YouTube video's details and, when available, its transcript. Unless the user asks for " +
+            "something else, summarize it in the order it's said: one or two sentences on what the video is, then walk " +
+            "through it from start to end, one short paragraph or bullet per part, each starting with its time linked " +
+            "to that spot, like [4:05](https://youtu.be/$id?t=245). Say who says what (host, guest, or the speakers' " +
+            "names when known), keep their actual points, examples, numbers and memorable lines, and note where they " +
+            "disagree. Don't regroup it by theme or add labels like 'Why it matters:' or 'Conclusion:'; end with how " +
+            "the video ends. Longer videos get more parts, but keep each one brief. The video's comments aren't " +
+            "included: Pocket AI can't read YouTube comments, so don't offer to.]"
 
     private class VideoInfo(
         val title: String, val channel: String, val seconds: Long, val description: String,

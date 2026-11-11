@@ -96,6 +96,7 @@ fun SettingsScreen(vm: ChatViewModel, onClose: () -> Unit) {
     var baseline by remember { mutableStateOf(Triple(start.baseUrl, start.apiKey, start.model)) }
 
     var webTools by remember { mutableStateOf(start.webTools) }
+    var phoneTools by remember { mutableStateOf(start.phoneTools) }
     var engine by remember { mutableStateOf(start.searchEngine) }
     var searchKeys by remember { mutableStateOf(start.searchKeys) }
     var systemPrompt by remember { mutableStateOf(start.systemPrompt) }
@@ -117,7 +118,7 @@ fun SettingsScreen(vm: ChatViewModel, onClose: () -> Unit) {
 
     fun finish() {
         vm.applyConnection(baseUrl, apiKey, model, models)
-        vm.saveGeneral(systemPrompt, webTools, engine, searchKeys)
+        vm.saveGeneral(systemPrompt, webTools, engine, searchKeys, phoneTools)
         onClose()
     }
 
@@ -263,6 +264,20 @@ fun SettingsScreen(vm: ChatViewModel, onClose: () -> Unit) {
 
                 HorizontalDivider(Modifier.padding(vertical = 8.dp))
                 AskButtonSection()
+
+                HorizontalDivider(Modifier.padding(vertical = 8.dp))
+                SectionTitle("Phone actions")
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Let the AI set alarms, timers and calendar events")
+                        Text(
+                            "Asks for Calendar access the first time. Each action shows a card in the chat; calendar events can be undone there.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Switch(checked = phoneTools, onCheckedChange = { phoneTools = it })
+                }
 
                 HorizontalDivider(Modifier.padding(vertical = 8.dp))
                 SectionTitle("Web tools")

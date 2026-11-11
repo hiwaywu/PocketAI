@@ -135,6 +135,17 @@ class AskService : AccessibilityService() {
         // the browser's own toolbar (not in the page).
         if (bar.isNullOrBlank() && browser) bar = w.addressBars.firstOrNull() ?: w.addresses.firstOrNull()
         var (url, site) = ScreenText.linkFromBar(bar)
+        // Some apps (the Reddit app on the owner's Fold, 2.15–2.19) show almost nothing to accessibility services:
+        // then read the text from a screenshot of the app instead.
+        var ocrLog: String? = null
+        if (w.pieces.sumOf { com.pocketai.chat.api.PageText.weight(it) } < OCR_BELOW) {
+            val ocr = runCatching { ScreenOcr.read(this, win?.id) }.getOrElse { ScreenOcr.Result(emptyList(), "ocr: ${it.message}") }
+            ocrLog = ocr.log
+            if (ocr.pieces.sumOf { it.length } > w.pieces.sumOf { it.length }) {
+                w.pieces.clear()
+                w.pieces.addAll(ocr.pieces)
+            }
+        }
         val screenText = ScreenText.clean(w.pieces)
         // YouTube app: it hides most of its text (comments, most of the transcript) from accessibility services, and
         // scrolling its transcript from outside never worked (2.9–2.18). So find the video by the title on screen and
@@ -190,7 +201,7 @@ class AskService : AccessibilityService() {
                 video != null -> null
                 else -> ScreenText.YOUTUBE_NOTE
             },
-            debug = listOfNotNull(ytLog, redditLog, runCatching { report(root, win) }.getOrNull())
+            debug = listOfNotNull(ocrLog, ytLog, redditLog, runCatching { report(root, win) }.getOrNull())
                 .joinToString("\n").ifBlank { null },
         )
     }
@@ -317,6 +328,9 @@ class AskService : AccessibilityService() {
     }
 
     companion object {
+        /** Screens with less readable text than this (weighted characters) are read from a screenshot too. */
+        private const val OCR_BELOW = 150
+
         /** The running service (null when the Ask Pocket AI shortcut is off), for the button's settings and tile. */
         @Volatile var instance: AskService? = null
             private set

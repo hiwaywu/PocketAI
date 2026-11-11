@@ -237,6 +237,7 @@ fun AskPanel(
                                     onShare = { shareText(context, m.finalContent?.ifBlank { null } ?: m.text, conv.title) },
                                     onFollowUp = {},
                                     modifier = Modifier,
+                                    onUndo = { vm.undoPhoneAction(conv.id, m.id, it) },
                                 )
                             }
                         }

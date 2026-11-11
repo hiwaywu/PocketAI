@@ -86,6 +86,7 @@ class ReplyService : Service() {
         private const val CH_DONE = "replies"
         private const val ONGOING_ID = 1
         private const val DONE_ID = 2
+        private const val ACTION_ID_BASE = 1000
         private const val MAX_WAKE_MS = 15 * 60 * 1000L
         const val EXTRA_OPEN_CHAT = "com.pocketai.chat.OPEN_CHAT"
 
@@ -122,6 +123,25 @@ class ReplyService : Service() {
                 .setCategory(NotificationCompat.CATEGORY_MESSAGE)
                 .build()
             notify(ctx, DONE_ID, n)
+        }
+
+        /**
+         * A phone action (alarm, timer) that couldn't open the Clock app because Pocket AI was in the background:
+         * Android only lets apps open other apps from the foreground, so the user taps this to finish it.
+         */
+        fun notifyTapToRun(ctx: Context, title: String, text: String, action: Intent) {
+            val pi = PendingIntent.getActivity(
+                ctx, text.hashCode(), action, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+            )
+            val n = NotificationCompat.Builder(ctx, CH_DONE)
+                .setSmallIcon(R.drawable.ic_notification)
+                .setContentTitle(title)
+                .setContentText(text)
+                .setContentIntent(pi)
+                .setAutoCancel(true)
+                .setCategory(NotificationCompat.CATEGORY_REMINDER)
+                .build()
+            notify(ctx, ACTION_ID_BASE + (text.hashCode() and 0xFFFF), n)
         }
 
         fun clearDone(ctx: Context) {

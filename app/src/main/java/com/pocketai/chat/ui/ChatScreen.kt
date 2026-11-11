@@ -119,6 +119,13 @@ import com.pocketai.chat.data.Conversation
 import com.pocketai.chat.data.ImageUtil
 import com.pocketai.chat.data.ModelRates
 import com.pocketai.chat.data.ToolEvent
+import com.pocketai.chat.phone.PhoneTools
+import androidx.compose.material.icons.outlined.Alarm
+import androidx.compose.material.icons.outlined.AlarmOff
+import androidx.compose.material.icons.outlined.EventBusy
+import androidx.compose.material.icons.outlined.Event
+import androidx.compose.material.icons.outlined.Timer
+import androidx.compose.ui.text.style.TextDecoration
 import com.pocketai.chat.data.hostOf
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -191,6 +198,7 @@ fun ChatScreen(
                                     onShare = { shareText(context, m.finalContent?.ifBlank { null } ?: m.text, conv.title) },
                                     onFollowUp = { vm.send(it) },
                                     modifier = Modifier.widthIn(max = 780.dp),
+                                    onUndo = { vm.undoPhoneAction(conv.id, m.id, it) },
                                 )
                             }
                         }
@@ -425,12 +433,13 @@ internal fun AssistantMessage(
     onShare: () -> Unit,
     onFollowUp: (String) -> Unit,
     modifier: Modifier,
+    onUndo: (ToolEvent) -> Unit = {},
 ) {
     val clipboard = LocalClipboardManager.current
     var showUsage by remember { mutableStateOf(false) }
     Column(modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         if (m.toolEvents.isNotEmpty()) {
-            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) { m.toolEvents.forEach { ToolEventRow(it) } }
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) { m.toolEvents.forEach { ToolEventRow(it, onUndo) } }
         }
         if (m.text.isNotBlank()) {
             SelectionContainer { MarkdownText(m.text.trimEnd(), onLink) }
@@ -519,7 +528,8 @@ internal fun AssistantMessage(
 }
 
 @Composable
-private fun ToolEventRow(e: ToolEvent) {
+private fun ToolEventRow(e: ToolEvent, onUndo: (ToolEvent) -> Unit) {
+    if (e.kind in PHONE_KINDS) return PhoneActionCard(e, onUndo)
     Surface(shape = RoundedCornerShape(8.dp), color = MaterialTheme.colorScheme.secondaryContainer) {
         Row(Modifier.padding(horizontal = 10.dp, vertical = 5.dp), verticalAlignment = Alignment.CenterVertically) {
             Icon(
@@ -686,6 +696,55 @@ private fun ImageViewer(path: String, onDismiss: () -> Unit) {
             contentAlignment = Alignment.Center,
         ) {
             bmp?.let { Image(it.asImageBitmap(), "Photo", contentScale = ContentScale.Fit, modifier = Modifier.fillMaxSize()) }
+        }
+    }
+}
+
+private val PHONE_KINDS = setOf("alarm", "alarm_off", "timer", "calendar", "calendar_deleted", "agenda")
+
+/** A phone action the AI took (2.20): tap opens it in Clock/Calendar; calendar events have Undo. */
+@Composable
+private fun PhoneActionCard(e: ToolEvent, onUndo: (ToolEvent) -> Unit) {
+    val context = LocalContext.current
+    val open = PhoneTools.openIntent(e)
+    Surface(
+        shape = RoundedCornerShape(12.dp),
+        color = MaterialTheme.colorScheme.tertiaryContainer,
+        modifier = Modifier.clip(RoundedCornerShape(12.dp)).clickable(enabled = open != null && !e.undone) {
+            open?.let { runCatching { context.startActivity(it) } }
+        },
+    ) {
+        Row(Modifier.padding(start = 12.dp, end = 4.dp, top = 4.dp, bottom = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+            Icon(
+                when (e.kind) {
+                    "alarm" -> Icons.Outlined.Alarm
+                    "alarm_off" -> Icons.Outlined.AlarmOff
+                    "calendar_deleted" -> Icons.Outlined.EventBusy
+                    "timer" -> Icons.Outlined.Timer
+                    else -> Icons.Outlined.Event
+                },
+                null,
+                Modifier.size(18.dp),
+                tint = MaterialTheme.colorScheme.onTertiaryContainer,
+            )
+            Spacer(Modifier.width(8.dp))
+            Text(
+                when (e.kind) {
+                    "calendar" -> (if (e.undone) "Removed: " else "Added: ") + e.label
+                    "calendar_deleted" -> (if (e.undone) "Put back: " else "Deleted: ") + e.label
+                    "agenda" -> "Checked calendar: " + e.label
+                    else -> e.label
+                },
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.onTertiaryContainer,
+                textDecoration = if (e.undone && e.kind == "calendar") TextDecoration.LineThrough else null,
+                modifier = Modifier.weight(1f, fill = false).padding(vertical = 6.dp),
+            )
+            if (!e.undone && ((e.kind == "calendar" && e.ref != null) || (e.kind == "calendar_deleted" && e.data != null))) {
+                TextButton(onClick = { onUndo(e) }) { Text("Undo") }
+            } else {
+                Spacer(Modifier.width(8.dp))
+            }
         }
     }
 }

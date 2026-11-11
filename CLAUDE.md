@@ -27,6 +27,10 @@ Owner's main provider is now NT Media (`https://api.ntmedia.store`, used ~99% of
   .jks and password; until they add them as the secrets `POCKETAI_KEYSTORE_BASE64` / `POCKETAI_KEYSTORE_PASSWORD`
   (sessions can't set secrets), the Release APK workflow can't sign. Never make yet another key without asking:
   every new key forces a reinstall that wipes chats.
+- Test builds: `./gradlew assemblePreview` → `app/build/outputs/apk/preview/app-preview.apk`, "Pocket AI Test"
+  (`com.pocketai.chat.test`, debug key): installs next to the real app with its own chats/settings, so feature
+  branches can be tried on the Fold without risking chats. A build from another container has another debug key,
+  so the test app may need uninstalling first.
 - Releases: bump `versionCode`/`versionName` in `app/build.gradle.kts`, write `release-notes/v<version>.md`,
   merge to `main`, then run the **Release APK** workflow (`.github/workflows/release.yml`, workflow_dispatch
   with input `version`). It builds the APK with the release key and creates the GitHub release.
@@ -168,6 +172,26 @@ Emulator: any image works again (no native code since 2.2).
   panel no longer suggests "What do the comments say?". If comments are wanted again: YouTube Data API
   `commentThreads.list` with a free Google API key (offered to the owner, not built). The old automation is in git
   history up to 2.18; `ScreenText` still has its tested parsing helpers (leadingTime, transcriptSegments, formatComment).
+- `phone/PhoneTools.kt` (2.20, on a test branch first): tools `set_alarm` / `set_timer` (Clock app via
+  `AlarmClock` intents with `EXTRA_SKIP_UI`, SET_ALARM permission, no prompt; Android blocks opening another app
+  from the background, so then a "Tap to set alarm" notification is posted instead) and `add_calendar_event` /
+  `list_calendar_events` (CalendarContract; writes to the Google account's primary calendar, default reminder 30 min;
+  reads `Instances` so repeating events show). READ/WRITE_CALENDAR is asked mid-reply through
+  `phone/PhonePermissions.kt` (`PermissionRequester()` in both activities; refused when no Pocket AI screen is
+  visible). Each action is a `ToolEvent` card (kinds alarm/timer/calendar/agenda): tap opens Clock/Calendar,
+  calendar cards have Undo (`ChatViewModel.undoPhoneAction`). Setting "Phone actions" (`AppSettings.phoneTools`).
+  The model gets no clock time (caching), so the tools take `in_minutes` and results state the current time.
+  First device test (beam-free, Nov 11): adding an event and an alarm worked; "alarm 12pm that day" (Fri 13th) became a
+  weekly Friday alarm, and "remove both" had no tool. Now: `set_alarm` takes `date` and refuses one that isn't the next
+  time that clock time comes round (Clock alarms have no date; suggests a calendar reminder instead);
+  `turn_off_alarm` (DISMISS_ALARM by time or label — Android can't delete other apps' alarms; falls back to opening the
+  alarm list); `delete_calendar_event` by id (ids are in add/list results; repeating events refused; a copy goes on
+  the card so Undo restores it). Undo taps are added to the re-sent assistant text so the model knows.
+- `screen/ScreenOcr.kt` (2.20 test): when a screen gives <150 weighted chars to accessibility (the Reddit app gave
+  0 on the Fold in 2.15–2.19), the button screenshots the app's window (`takeScreenshotOfWindow`, API 34+;
+  `canTakeScreenshot` in ask_service.xml) and reads it with ML Kit text recognition (Play services' Chinese model,
+  also reads English; `com.google.mlkit.vision.DEPENDENCIES=ocr_chinese`). The OCR blocks replace the pieces, so the
+  Reddit-app path (title → whole thread) still runs. Logged as "ocr: …" in Details. Untested on a device.
 - `data/Rates.kt` — NT Media per-model usage multipliers (from its price list; its API doesn't expose
   them). `ReplyUsage.multiplier`/`billed` = tokens × multiplier, shown in chat, usage dialog/screen, model menu.
 - `data/Settings.kt` — `AppSettings` (saved API profiles, search engine/keys), stored as one AES-GCM
@@ -212,6 +236,17 @@ Emulator: any image works again (no native code since 2.2).
   2.5: the owner asked for summaries "how you'd do it, like you as a chatbot" — all layout rules were dropped. The
   prompt now just says: explain it like a thoughtful friend in a chat, shape that fits, keep specifics, no
   templates or "TL;DR:" labels, say if something couldn't be read. Don't reintroduce templates.
+  2.20 exception, at the owner's request: **videos are summarized in the order they're said** (what it is, then
+  start → end, each part led by its linked time, who says what), not regrouped by theme with bold labels — the
+  owner called the topic-grouped version of a 33-min Cantonese talk show "crap". Lives in `youtubeGuide`.
+  2.20, also at the owner's request ("the Reddit summary sucks"): `Reddit.GUIDE` now asks for two parts — what it's
+  about (post + linked article or picture, with details) and what people are saying (main reactions most upvoted
+  first, disagreements, corrections, sharp/funny takes; for questions, the answer and how sure people are).
+- Reddit pictures (2.20): image/gallery posts (and a video's preview frame) carry up to 3 picture URLs
+  (`RedditPost.images`); after a `fetch_url` the app downloads them (`WebTools.imageDataUrl`, 1024 px JPEG) and adds a
+  user message with them to the tool trail (marked `_pocketai_pictures`, stripped before sending). A 400 while
+  pictures are in the trail drops them and retries. The saved trail keeps only a text note, so chat files and later
+  requests don't carry the images.
 - 2.6: the owner asked that the AI "follow other instructions similar to you" (Claude). `DEFAULT_SYSTEM_PROMPT` and the
   added language/summary/web rules were rewritten in that plain style: answer first, length matches the question,
   prose over formatting, honest about uncertainty, opinions when asked, no filler or closing offers. Still no

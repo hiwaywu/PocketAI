@@ -7,11 +7,28 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- Phone actions (2.20): alarms and timers through the Clock app (no prompt), the calendar (asked once). -->
+    <uses-permission android:name="com.android.alarm.permission.SET_ALARM" />
+    <uses-permission android:name="android.permission.READ_CALENDAR" />
+    <uses-permission android:name="android.permission.WRITE_CALENDAR" />
 
     <!-- Android 11+ hides other apps unless declared: the phone's text-to-speech engine reads replies aloud. -->
     <queries>
         <intent>
             <action android:name="android.intent.action.TTS_SERVICE" />
+        </intent>
+        <!-- The Clock app, for alarms and timers. -->
+        <intent>
+            <action android:name="android.intent.action.SET_ALARM" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.SET_TIMER" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.DISMISS_ALARM" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.SHOW_ALARMS" />
         </intent>
     </queries>
 
@@ -56,7 +73,7 @@
             android:name=".AskActivity"
             android:exported="true"
             android:theme="@style/Theme.PocketAI.Panel"
-            android:taskAffinity="com.pocketai.chat.ask"
+            android:taskAffinity="${applicationId}.ask"
             android:launchMode="singleTask"
             android:excludeFromRecents="true"
             android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|navigation|density|uiMode"
@@ -102,6 +119,11 @@
             android:name=".ReplyService"
             android:exported="false"
             android:foregroundServiceType="dataSync" />
+
+        <!-- Have Play services download the text-recognition model at install, not on the first button tap. -->
+        <meta-data
+            android:name="com.google.mlkit.vision.DEPENDENCIES"
+            android:value="ocr_chinese" />
 
         <provider
             android:name="androidx.core.content.FileProvider"

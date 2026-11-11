@@ -256,6 +256,10 @@ Emulator: any image works again (no native code since 2.2).
   says to give the comments at least as much room as the article. Comment budget 14k → 24k chars. After the owner
   pasted the right summary, it did cover the thread well (top views, counter-arguments, quotes); the complaint left
   was "only a slice of the comments", hence the bigger budget.
+  Also 2.21: a text post that pastes a news snippet plus its link (r/Connecticut, Patch story) was summarized from
+  the snippet; `Reddit.articleLink` now reads the first article link in a text post's body too. When the article
+  can't be opened, the tool result tells the model to web_search the headline and read another outlet's copy (it did
+  that on its own when the owner asked "are you reading the article?"), and the chip says "couldn't open <site>".
 - 2.6: the owner asked that the AI "follow other instructions similar to you" (Claude). `DEFAULT_SYSTEM_PROMPT` and the
   added language/summary/web rules were rewritten in that plain style: answer first, length matches the question,
   prose over formatting, honest about uncertainty, opinions when asked, no filler or closing offers. Still no

@@ -350,7 +350,7 @@ return JSON.stringify({u:location.href.slice(0,90),t:(document.title||'').slice(
         } ?: return null
         val (t, link, fromPage) = thread
         if (t == null) return null
-        val linked = t.post.linkUrl?.takeIf { Reddit.isReadableLink(it) }?.let { target ->
+        val linked = Reddit.articleLink(t.post)?.let { target ->
             onStatus("Reading the linked page: ${hostOf(target)}")
             attempt { fetch(target, deepSeekKey) }
         }
@@ -358,7 +358,7 @@ return JSON.stringify({u:location.href.slice(0,90),t:(document.title||'').slice(
         fun count(cs: List<RedditComment>): Int = cs.sumOf { 1 + count(it.replies) }
         val n = count(t.comments)
         val detail = (if (n == 0) "no comments read" else "$n comments") + (if (fromPage) " (from the web page)" else "") +
-            (if (linked != null) " + ${hostOf(linked.url)}" else "")
+            (if (linked != null) " + ${hostOf(linked.url)}" else Reddit.articleLink(t.post)?.let { " (couldn't open ${hostOf(it)})" } ?: "")
         return FetchedPage(title, link, Reddit.format(t, System.currentTimeMillis(), linked), t.post.images, detail)
     }
 

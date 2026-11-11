@@ -108,6 +108,19 @@ object Reddit {
         return MEDIA_EXT.none { path.endsWith(it) }
     }
 
+    private val TEXT_LINK = Regex("""https?://[^\s<>\[\]()"']+""")
+
+    /**
+     * The article a text post shares in its body ("Patch: Ferris Acres named No. 2… https://patch.com/…"). 2.21: such
+     * posts were summarized from the pasted snippet only, because only link posts had their page read.
+     */
+    fun firstLinkInText(text: String): String? =
+        TEXT_LINK.findAll(text).map { it.value.trimEnd('.', ',', ';', ':', '!', '?', '*', '_') }.firstOrNull { isReadableLink(it) }
+
+    /** The page the post is about: a link post's target, or the first article link in a text post. */
+    fun articleLink(p: RedditPost): String? =
+        p.linkUrl?.takeIf { isReadableLink(it) } ?: if (p.kind == "text") firstLinkInText(p.selfText) else null
+
     /** Pictures from one post shown to the AI (each costs about a thousand tokens). */
     const val MAX_IMAGES = 3
     private val MEDIA_EXT = listOf(".jpg", ".jpeg", ".png", ".gif", ".gifv", ".webp", ".mp4", ".webm", ".mov", ".mp3", ".pdf")
@@ -327,8 +340,12 @@ object Reddit {
         if (linked != null) {
             append("\nThe linked page (read for you): ${linked.title}\nURL: ${linked.url}\n")
             append(clip(linked.text, LINKED_BUDGET)).append("\n")
-        } else if (p.linkUrl != null && p.kind != "image") {
-            append("(The linked page couldn't be read; summarize it from the title and comments, and say so.)\n")
+        } else articleLink(p)?.let { link ->
+            append(
+                "(The post links to $link, which couldn't be read. Before summarizing, find the same story elsewhere " +
+                    "(web_search its headline) and read one version of it, so the summary covers the whole article, not " +
+                    "just the title or a pasted snippet; if you can't, say so.)\n"
+            )
         }
         append("\n")
         if (t.singleCommentThread) append("The user linked to one comment, so only that part of the thread is below.\n")

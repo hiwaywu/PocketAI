@@ -38,7 +38,7 @@ import kotlin.coroutines.resume
 import kotlin.math.min
 
 data class SearchHit(val title: String, val url: String, val snippet: String)
-data class FetchedPage(val title: String, val url: String, val text: String)
+data class FetchedPage(val title: String, val url: String, val text: String, val images: List<String> = emptyList())
 
 /**
  * The AI's web tools. They run on the phone: the model asks for a search or a page,
@@ -348,7 +348,37 @@ return JSON.stringify({u:location.href.slice(0,90),t:(document.title||'').slice(
             attempt { fetch(target, deepSeekKey) }
         }
         val title = t.post.title + if (t.post.subreddit.isNotBlank()) " : ${t.post.subreddit}" else ""
-        return FetchedPage(title, link, Reddit.format(t, System.currentTimeMillis(), linked))
+        return FetchedPage(title, link, Reddit.format(t, System.currentTimeMillis(), linked), t.post.images)
+    }
+
+    /**
+     * Downloads a picture (a Reddit post's image) for the AI to look at: downscaled to [maxDim] px and sent as a JPEG
+     * data URL, like the user's own photos. Null if it can't be read.
+     */
+    suspend fun imageDataUrl(url: String, maxDim: Int = 1024): String? = withContext(Dispatchers.IO) {
+        runCatching {
+            val bytes = http.newCall(Request.Builder().url(url).header("User-Agent", UA).build()).execute().use { r ->
+                if (!r.isSuccessful) return@runCatching null
+                val body = r.body ?: return@runCatching null
+                if ((body.contentLength()) > 15_000_000) return@runCatching null
+                body.bytes()
+            }
+            val bounds = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
+            if (bounds.outWidth <= 0) return@runCatching null
+            var sample = 1
+            while (maxOf(bounds.outWidth, bounds.outHeight) / (sample * 2) >= maxDim) sample *= 2
+            var bmp = android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size,
+                android.graphics.BitmapFactory.Options().apply { inSampleSize = sample }) ?: return@runCatching null
+            val longest = maxOf(bmp.width, bmp.height)
+            if (longest > maxDim) {
+                val f = maxDim.toFloat() / longest
+                bmp = android.graphics.Bitmap.createScaledBitmap(bmp, (bmp.width * f).toInt().coerceAtLeast(1), (bmp.height * f).toInt().coerceAtLeast(1), true)
+            }
+            val out = java.io.ByteArrayOutputStream()
+            bmp.compress(android.graphics.Bitmap.CompressFormat.JPEG, 82, out)
+            "data:image/jpeg;base64," + android.util.Base64.encodeToString(out.toByteArray(), android.util.Base64.NO_WRAP)
+        }.getOrNull()
     }
 
     /**

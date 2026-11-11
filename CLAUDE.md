@@ -239,6 +239,14 @@ Emulator: any image works again (no native code since 2.2).
   2.20 exception, at the owner's request: **videos are summarized in the order they're said** (what it is, then
   start → end, each part led by its linked time, who says what), not regrouped by theme with bold labels — the
   owner called the topic-grouped version of a 33-min Cantonese talk show "crap". Lives in `youtubeGuide`.
+  2.20, also at the owner's request ("the Reddit summary sucks"): `Reddit.GUIDE` now asks for two parts — what it's
+  about (post + linked article or picture, with details) and what people are saying (main reactions most upvoted
+  first, disagreements, corrections, sharp/funny takes; for questions, the answer and how sure people are).
+- Reddit pictures (2.20): image/gallery posts (and a video's preview frame) carry up to 3 picture URLs
+  (`RedditPost.images`); after a `fetch_url` the app downloads them (`WebTools.imageDataUrl`, 1024 px JPEG) and adds a
+  user message with them to the tool trail (marked `_pocketai_pictures`, stripped before sending). A 400 while
+  pictures are in the trail drops them and retries. The saved trail keeps only a text note, so chat files and later
+  requests don't carry the images.
 - 2.6: the owner asked that the AI "follow other instructions similar to you" (Claude). `DEFAULT_SYSTEM_PROMPT` and the
   added language/summary/web rules were rewritten in that plain style: answer first, length matches the question,
   prose over formatting, honest about uncertainty, opinions when asked, no filler or closing offers. Still no

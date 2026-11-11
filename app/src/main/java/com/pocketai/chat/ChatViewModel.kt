@@ -575,6 +575,10 @@ class ChatViewModel(private val app: Application) : AndroidViewModel(app) {
     private suspend fun agentLoop(convId: String, msgId: String, history: BuiltHistory, s: AppSettings) {
         val trail = mutableListOf<JsonObject>()
         val sources = mutableListOf<Source>()
+        // Pictures from pages the AI read (a Reddit post's image), shown to it after the tool results. Off for the rest
+        // of the reply if the model turns out not to take images.
+        val pagePictures = mutableListOf<String>()
+        var picturesOk = true
         var useTools = s.webTools || s.phoneTools
         val toolDefs = buildJsonArray {
             if (s.webTools) WebTools.TOOL_DEFS.forEach { add(it) }
@@ -607,7 +611,7 @@ class ChatViewModel(private val app: Application) : AndroidViewModel(app) {
                 if (includeUsage) putJsonObject("stream_options") { put("include_usage", true) }
                 putJsonArray("messages") {
                     history.messages.forEach { add(it) }
-                    trail.forEach { add(it) }
+                    trail.forEach { add(if (it.isPictureNote()) JsonObject(it - PICTURE_NOTE) else it) }
                     // Out of web steps: without this, some models (DeepSeek) still try to search and print the
                     // raw tool-call markup as their answer.
                     if (useTools && !allowTools && trail.isNotEmpty()) addJsonObject {
@@ -630,6 +634,13 @@ class ChatViewModel(private val app: Application) : AndroidViewModel(app) {
                     round--
                     continue
                 }
+                if (e.code in 400..422 && trail.any { it.isPictureNote() }) {
+                    // The model doesn't take images: drop the pictures and ask again without them.
+                    trail.removeAll { it.isPictureNote() }
+                    picturesOk = false
+                    round--
+                    continue
+                }
                 if (allowTools && trail.isEmpty() && e.code in 400..422 && (msg.contains("tool", true) || msg.contains("function", true))) {
                     useTools = false
                     notice("This model can't use tools, so it's answering without them.")
@@ -644,8 +655,8 @@ class ChatViewModel(private val app: Application) : AndroidViewModel(app) {
             outputChars += res.content.length + res.toolCalls.sumOf { it.arguments.length }
             estHistory += history.textChars / 4 + (if (allowTools) toolDefTokens else 0)
             estShared += history.sharedChars / 4
-            estPhotos += history.images * PHOTO_TOKENS
-            estWeb += (history.webChars + trail.sumOf { it.toString().length }) / 4
+            estPhotos += (history.images + trail.filter { it.isPictureNote() }.sumOf { m -> (m["content"] as? kotlinx.serialization.json.JsonArray)?.size?.minus(1) ?: 0 }) * PHOTO_TOKENS
+            estWeb += (history.webChars + trail.filterNot { it.isPictureNote() }.sumOf { it.toString().length }) / 4
 
             if (res.toolCalls.isEmpty() || !allowTools) {
                 finalContent = res.content
@@ -674,7 +685,7 @@ class ChatViewModel(private val app: Application) : AndroidViewModel(app) {
                     }
                 }
             }
-            val results = coroutineScope { calls.map { tc -> async { runTool(convId, msgId, tc, s, sources) } }.awaitAll() }
+            val results = coroutineScope { calls.map { tc -> async { runTool(convId, msgId, tc, s, sources, pagePictures) } }.awaitAll() }
             calls.zip(results).forEach { (tc, result) ->
                 trail += buildJsonObject {
                     put("role", "tool")
@@ -682,6 +693,24 @@ class ChatViewModel(private val app: Application) : AndroidViewModel(app) {
                     put("content", result)
                 }
             }
+            if (pagePictures.isNotEmpty() && picturesOk) {
+                setStatus(convId, "Looking at the picture…")
+                val urls = coroutineScope { pagePictures.map { u -> async { web.imageDataUrl(u) } }.awaitAll() }.filterNotNull()
+                if (urls.isNotEmpty()) {
+                    trail += buildJsonObject {
+                        put("role", "user")
+                        put(PICTURE_NOTE, true)
+                        putJsonArray("content") {
+                            addJsonObject {
+                                put("type", "text")
+                                put("text", "[Pocket AI: the picture${if (urls.size > 1) "s" else ""} from the post you just read.]")
+                            }
+                            urls.forEach { u -> addJsonObject { put("type", "image_url"); putJsonObject("image_url") { put("url", u) } } }
+                        }
+                    }
+                }
+            }
+            pagePictures.clear()
         }
 
         if (finalContent.isBlank() && convOf(convId)?.messages?.firstOrNull { it.id == msgId }?.text.isNullOrBlank()) {
@@ -711,7 +740,11 @@ class ChatViewModel(private val app: Application) : AndroidViewModel(app) {
         )
         updateMsg(convId, msgId) {
             it.copy(
-                apiTrail = trail.toList(), finalContent = finalContent, usage = usage,
+                // Pictures aren't kept in the chat file (or re-sent later): a short note stands in for them.
+                apiTrail = trail.map {
+                    if (!it.isPictureNote()) it
+                    else buildJsonObject { put("role", "user"); put("content", "[Pocket AI: the post's picture was shown here.]") }
+                }, finalContent = finalContent, usage = usage,
                 sources = sources.distinctBy { src -> src.url }.take(12),
             )
         }
@@ -749,7 +782,11 @@ class ChatViewModel(private val app: Application) : AndroidViewModel(app) {
         }
     }
 
-    private suspend fun runTool(convId: String, msgId: String, tc: ToolCall, s: AppSettings, sources: MutableList<Source>): String {
+    private fun JsonObject.isPictureNote() = this[PICTURE_NOTE] != null
+
+    private suspend fun runTool(
+        convId: String, msgId: String, tc: ToolCall, s: AppSettings, sources: MutableList<Source>, pictures: MutableList<String>,
+    ): String {
         val args = runCatching { Json.parseToJsonElement(tc.arguments.ifBlank { "{}" }).jsonObject }.getOrElse { JsonObject(emptyMap()) }
         return when (tc.name) {
             "web_search" -> {
@@ -786,6 +823,7 @@ class ChatViewModel(private val app: Application) : AndroidViewModel(app) {
                 try {
                     val page = web.fetch(url, s.deepSeekKey.takeIf { s.searchEngine == SearchEngine.DEEPSEEK }) { setStatus(convId, it) }
                     sources += Source(page.title, page.url)
+                    synchronized(pictures) { pictures += page.images }
                     nameAfterPage(convId, page.title)
                     "Title: ${page.title}\nURL: ${page.url}\n\n${page.text}"
                 } catch (e: CancellationException) {
@@ -966,6 +1004,8 @@ class ChatViewModel(private val app: Application) : AndroidViewModel(app) {
         /** Photos and shared pages are re-sent only for this many of the latest user messages. */
         const val KEEP_MEDIA_TURNS = 4
         private const val PHOTO_TOKENS = 1200L
+        /** Marks the message carrying a read page's pictures in the tool trail (removed before sending). */
+        private const val PICTURE_NOTE = "_pocketai_pictures"
         /** Waits before re-sending a step after the connection dropped. */
         private val NET_RETRY_DELAYS = longArrayOf(2_000, 5_000, 10_000)
         private val RETRY_HTTP_CODES = setOf(408, 500, 502, 503, 504, 520, 522, 524, 529)

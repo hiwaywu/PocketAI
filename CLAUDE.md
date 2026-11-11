@@ -268,6 +268,10 @@ Emulator: any image works again (no native code since 2.2).
   "View more comments" up to 8 rounds while comments grow, ≤30 s) and parses that with `parseHtml` (depth-0 comments
   anywhere in the page). If all fails, the generic page goes to the model with a note saying the reader failed and
   why, and the chip says "web page only: <reason>". Don't solve Reddit's challenge outside a real WebView.
+  First device test of that (Nov 11, 1,100-comment r/worldnews thread): JSON 403 on the phone too; chip "no comments
+  read (from the web page)" — the downloaded HTML had the post but no comments (they load by JS), and it was accepted.
+  Now a downloaded page only counts if it has comments; otherwise the WebView (desktop UA, which has the full comment
+  tree) runs and waits up to ~11 s for the first comments before scrolling / "View more comments" (≤10 rounds).
 - 2.6: the owner asked that the AI "follow other instructions similar to you" (Claude). `DEFAULT_SYSTEM_PROMPT` and the
   added language/summary/web rules were rewritten in that plain style: answer first, length matches the question,
   prose over formatting, honest about uncertainty, opinions when asked, no filler or closing offers. Still no

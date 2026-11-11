@@ -94,10 +94,12 @@ return JSON.stringify({u:location.href.slice(0,90),t:(document.title||'').slice(
 if(!document.querySelector('shreddit-post'))return 'wait';
 var n=document.querySelectorAll('shreddit-comment').length;
 window.__paR=(window.__paR||0)+1;
-if(window.__paR>8)return 'done';
+if(window.__paR>18)return 'done';
 window.scrollTo(0,document.body.scrollHeight);
 var b=document.querySelectorAll('button');
 for(var i=0;i<b.length;i++){var t=(b[i].innerText||'').toLowerCase();if(t.indexOf('view more comments')>=0||t.indexOf('more comments')>=0){b[i].click();break;}}
+if(n===0)return window.__paR>14?'done':'more';
+if(window.__paR>10)return 'done';
 if(n!==window.__paN){window.__paN=n;window.__paS=0;return 'more';}
 window.__paS=(window.__paS||0)+1;return window.__paS>=3?'done':'more';
 }catch(e){return 'done';}})()"""
@@ -406,18 +408,24 @@ window.__paS=(window.__paS||0)+1;return window.__paS>=3?'done':'more';
                     .onFailure { refused = it.message?.substringBefore(" from ") }
                     .getOrNull()?.let { Reddit.parse(it) }?.also { refused = null }
             }
-            val t = fromJson ?: runCatching { getText(link, UA, "text/html") }.getOrNull()?.let { Reddit.parseHtml(it, link) }
+            val t = fromJson ?: listOf(DESKTOP_UA, UA).firstNotNullOfOrNull { ua ->
+                runCatching { getText(link, ua, "text/html") }.getOrNull()?.let { Reddit.parseHtml(it, link) }
+            }
             Triple(t?.copy(singleCommentThread = jsonUrl.contains("context=")), link, refused)
         }.let { (t, link, refused) ->
-            if (t != null) Triple(t, link, refused != null)
+            // A downloaded page has the post but loads its comments afterwards with JavaScript (device test, Nov 11:
+            // "no comments read" on a 1,100-comment thread), so that only counts when the comments came with it.
+            val hasComments = t != null && (t.comments.isNotEmpty() || (t.post.numComments ?: 1) == 0)
+            if (t != null && (refused == null || hasComments)) Triple(t, link, refused != null)
             else {
                 // Nov 2026: Reddit answers plain downloads with a "checking your browser" page (and its JSON with 403),
                 // so open the thread in the hidden WebView like a browser and read the finished page.
                 onStatus("Opening the Reddit thread…")
                 val html = renderRedditHtml(link)
                 val parsed = html?.let { withContext(Dispatchers.Default) { Reddit.parseHtml(it, link) } }
+                val best = listOfNotNull(parsed, t).maxByOrNull { it.comments.size }
                     ?: throw IOException("Reddit refused the thread (${refused ?: "unreadable reply"}) and the page didn't load")
-                Triple(parsed, link, true)
+                Triple(best.copy(singleCommentThread = t?.singleCommentThread ?: false), link, true)
             }
         }
         val (t, link, fromPage) = thread
@@ -736,8 +744,9 @@ window.__paS=(window.__paS||0)+1;return window.__paS>=3?'done':'more';
                 val wv = WebView(appContext)
                 wv.settings.javaScriptEnabled = true
                 wv.settings.domStorageEnabled = true
-                wv.settings.userAgentString = UA
-                wv.layout(0, 0, 1080, 2400)
+                // The desktop page carries the full comment tree; the mobile one pushes "open in app".
+                wv.settings.userAgentString = DESKTOP_UA
+                wv.layout(0, 0, 1280, 2400)
                 var done = false
                 var polls = 0
                 fun finish(html: String?) {

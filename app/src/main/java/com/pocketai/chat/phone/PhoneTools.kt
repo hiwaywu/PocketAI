@@ -54,6 +54,8 @@ class PhoneTools(private val context: Context) {
             "set_timer" -> setTimer(args, visible())
             "add_calendar_event" -> addEvent(args, visible)
             "list_calendar_events" -> listEvents(args, visible)
+            "delete_calendar_event" -> deleteEventTool(args, visible)
+            "turn_off_alarm" -> turnOffAlarm(args, visible())
             else -> Outcome("Error: unknown tool $name.")
         }
     } catch (e: IllegalArgumentException) {
@@ -73,6 +75,18 @@ class PhoneTools(private val context: Context) {
         }
         val label = args.str("label")
         val days = args.list("days").mapNotNull { dayOf(it) }.distinct().sorted()
+        // Clock alarms have no date: a one-time alarm rings at the next time the clock shows [time]. A device test set
+        // "12:00 on Friday the 13th" as a weekly Friday alarm, so a date further away is refused with what to do instead.
+        val next = time.atDate(now.toLocalDate()).let { if (it.isAfter(now)) it else it.plusDays(1) }
+        val date = args.str("date")?.let { parseDate(it) }
+        if (date != null && days.isEmpty() && date != next.toLocalDate()) {
+            return Outcome(
+                "Not set: the phone's Clock app can't set an alarm for a date. A one-time alarm rings the next time the " +
+                    "clock shows ${"%02d:%02d".format(time.hour, time.minute)} (${next.format(DAY)}), not on ${date.format(DAY)}. " +
+                    "Don't use repeat days instead. Offer a calendar reminder at that moment instead (a short event with " +
+                    "add_calendar_event and reminder_minutes 0), or setting the alarm the day before. Current time: ${now.format(CLOCK)}."
+            )
+        }
         val i = Intent(AlarmClock.ACTION_SET_ALARM).apply {
             putExtra(AlarmClock.EXTRA_HOUR, time.hour)
             putExtra(AlarmClock.EXTRA_MINUTES, time.minute)
@@ -88,7 +102,7 @@ class PhoneTools(private val context: Context) {
         val nowText = "Current time: ${now.format(CLOCK)}."
         return Outcome(
             "Alarm ${if (how == Launch.NOTIFICATION) "offered as a notification (the app was in the background, so the user has to tap it)" else "set in the Clock app"}: " +
-                "$hhmm${dayText?.let { ", repeats $it" } ?: ""}${label?.let { ", label \"$it\"" } ?: ""}. $nowText",
+                "$hhmm${dayText?.let { ", repeats $it" } ?: ", once, rings ${next.format(DAY_TIME)}"}${label?.let { ", label \"$it\"" } ?: ""}. $nowText",
             ToolEvent(kind = "alarm", label = card + if (how == Launch.NOTIFICATION) " (tap the notification)" else ""),
         )
     }
@@ -113,6 +127,47 @@ class PhoneTools(private val context: Context) {
             if (how == Launch.NOTIFICATION) "Timer offered as a notification (the app was in the background, so it starts when the user taps it): $len."
             else "Timer started: $len${label?.let { " ($it)" } ?: ""}. It ends at ${LocalTime.now().plusSeconds(seconds.toLong()).format(HHMM)}.",
             ToolEvent(kind = "timer", label = card + if (how == Launch.NOTIFICATION) " (tap the notification)" else ""),
+        )
+    }
+
+    /**
+     * Android has no "delete alarm" for other apps, only DISMISS_ALARM: depending on the Clock app it turns the alarm
+     * off or skips its next ring, and may ask the user to pick one. Said plainly to the model and on the card.
+     */
+    private fun turnOffAlarm(args: JsonObject, visible: Boolean): Outcome {
+        val label = args.str("label")
+        val time = args.str("time")?.let { parseTime(it) }
+        require(label != null || time != null) { "give the alarm's 'time' (HH:MM) or its 'label'." }
+        val i = Intent(AlarmClock.ACTION_DISMISS_ALARM).apply {
+            if (time != null) {
+                putExtra(AlarmClock.EXTRA_ALARM_SEARCH_MODE, AlarmClock.ALARM_SEARCH_MODE_TIME)
+                putExtra(AlarmClock.EXTRA_HOUR, time.hour)
+                putExtra(AlarmClock.EXTRA_MINUTES, time.minute)
+                putExtra(AlarmClock.EXTRA_IS_PM, time.hour >= 12)
+            } else {
+                putExtra(AlarmClock.EXTRA_ALARM_SEARCH_MODE, AlarmClock.ALARM_SEARCH_MODE_LABEL)
+                putExtra(AlarmClock.EXTRA_MESSAGE, label)
+            }
+        }
+        val what = listOfNotNull(time?.format(HHMM), label?.let { "\"$it\"" }).joinToString(" ")
+        val card = "Turn off alarm $what"
+        if (i.resolveActivity(context.packageManager) == null) {
+            // This Clock app can't be asked to turn alarms off: open its alarm list instead.
+            val list = Intent(AlarmClock.ACTION_SHOW_ALARMS)
+            val how = launch(list, visible, "Tap to open your alarms", card)
+            return Outcome(
+                "The Clock app on this phone doesn't let other apps turn alarms off. " +
+                    (if (how == Launch.OPENED) "Its alarm list was opened so the user can delete the $what alarm." else "Tell the user to delete the $what alarm in the Clock app."),
+                ToolEvent(kind = "alarm_off", label = "Open Clock to delete alarm $what"),
+            )
+        }
+        val how = launch(i, visible, "Tap to turn off alarm", card)
+        return Outcome(
+            "Asked the Clock app to turn off the $what alarm" +
+                (if (how == Launch.NOTIFICATION) " (as a notification the user has to tap, since the app was in the background)" else "") +
+                ". Android only lets other apps switch an alarm off or skip its next ring, not delete it, and the Clock app " +
+                "may ask the user to choose; say so briefly. The card opens the Clock app if it's still there.",
+            ToolEvent(kind = "alarm_off", label = card + if (how == Launch.NOTIFICATION) " (tap the notification)" else ""),
         )
     }
 
@@ -196,7 +251,7 @@ class PhoneTools(private val context: Context) {
             else -> "reminder ${minutesText(reminder)} before"
         }
         return Outcome(
-            "Added to the calendar \"${cal.name}\": $title, $whenText" +
+            "Added to the calendar \"${cal.name}\" (event id $id): $title, $whenText" +
                 (args.str("location")?.let { ", at $it" } ?: "") + (remindText?.let { ", $it" } ?: "") +
                 ". The user can undo it from the card in the chat.",
             ToolEvent(kind = "calendar", label = "$title · $whenText", ref = id),
@@ -219,7 +274,7 @@ class PhoneTools(private val context: Context) {
             arrayOf(
                 CalendarContract.Instances.TITLE, CalendarContract.Instances.BEGIN, CalendarContract.Instances.END,
                 CalendarContract.Instances.ALL_DAY, CalendarContract.Instances.EVENT_LOCATION,
-                CalendarContract.Instances.CALENDAR_DISPLAY_NAME,
+                CalendarContract.Instances.CALENDAR_DISPLAY_NAME, CalendarContract.Instances.EVENT_ID,
             ),
             "${CalendarContract.Instances.VISIBLE} = 1", null, "${CalendarContract.Instances.BEGIN} ASC",
         )?.use { c ->
@@ -236,7 +291,7 @@ class PhoneTools(private val context: Context) {
                     s.format(DAY_TIME) + "–" + (if (e.toLocalDate() == s.toLocalDate()) e.format(HHMM) else e.format(DAY_TIME))
                 }
                 val where = c.getString(4)?.ifBlank { null }?.let { " @ $it" } ?: ""
-                lines += "- $text: $title$where [${c.getString(5).orEmpty()}]"
+                lines += "- $text: $title$where [${c.getString(5).orEmpty()}, id ${c.getLong(6)}]"
             }
         }
         val range = if (to == from) from.format(DAY) else "${from.format(DAY)} – ${to.format(DAY)}"
@@ -247,6 +302,98 @@ class PhoneTools(private val context: Context) {
             ToolEvent(kind = "agenda", label = range, ref = begin),
         )
     }
+
+    /**
+     * Deletes one event by id (from add_calendar_event or list_calendar_events). A copy is kept on the card so Undo
+     * can put it back. Repeating events are left alone: deleting one would remove the whole series.
+     */
+    private suspend fun deleteEventTool(args: JsonObject, visible: () -> Boolean): Outcome {
+        val id = args.int("event_id")?.toLong() ?: throw IllegalArgumentException(
+            "missing 'event_id' (it's in add_calendar_event's result, or call list_calendar_events for that day first)."
+        )
+        if (!calendarAllowed(visible)) return Outcome(NO_CALENDAR)
+        val copy = readEvent(id) ?: return Outcome("No event with id $id (it may already be deleted). List that day's events to check.")
+        if (!copy.rrule.isNullOrBlank()) {
+            return Outcome(
+                "Not deleted: \"${copy.title}\" is a repeating event, and deleting it here would remove every repeat. " +
+                    "Tell the user to delete the one they mean in the Calendar app (the card opens it).",
+                ToolEvent(kind = "agenda", label = copy.title, ref = copy.start),
+            )
+        }
+        if (!deleteEvent(id)) return Outcome("The calendar didn't delete event $id.")
+        val whenText = copy.whenText()
+        return Outcome(
+            "Deleted from the calendar: ${copy.title}, $whenText. The user can undo it from the card in the chat.",
+            ToolEvent(kind = "calendar_deleted", label = "${copy.title} · $whenText", ref = id, data = kotlinx.serialization.json.Json.encodeToString(EventCopy.serializer(), copy)),
+        )
+    }
+
+    @kotlinx.serialization.Serializable
+    class EventCopy(
+        val calendarId: Long, val title: String, val start: Long, val end: Long, val timeZone: String?, val allDay: Boolean,
+        val location: String?, val notes: String?, val rrule: String? = null, val reminders: List<Int> = emptyList(),
+    ) {
+        fun whenText(): String = if (allDay) {
+            Instant.ofEpochMilli(start).atZone(ZoneOffset.UTC).toLocalDate().format(DAY) + " (all day)"
+        } else {
+            val z = ZoneId.systemDefault()
+            val s = Instant.ofEpochMilli(start).atZone(z).toLocalDateTime()
+            val e = Instant.ofEpochMilli(end).atZone(z).toLocalDateTime()
+            s.format(DAY_TIME) + "–" + (if (e.toLocalDate() == s.toLocalDate()) e.format(HHMM) else e.format(DAY_TIME))
+        }
+    }
+
+    private fun readEvent(id: Long): EventCopy? {
+        val uri = ContentUris.withAppendedId(CalendarContract.Events.CONTENT_URI, id)
+        val copy = context.contentResolver.query(
+            uri,
+            arrayOf(
+                CalendarContract.Events.CALENDAR_ID, CalendarContract.Events.TITLE, CalendarContract.Events.DTSTART,
+                CalendarContract.Events.DTEND, CalendarContract.Events.EVENT_TIMEZONE, CalendarContract.Events.ALL_DAY,
+                CalendarContract.Events.EVENT_LOCATION, CalendarContract.Events.DESCRIPTION, CalendarContract.Events.RRULE,
+                CalendarContract.Events.DELETED,
+            ),
+            null, null, null,
+        )?.use { c ->
+            if (!c.moveToFirst() || c.getInt(9) == 1) null
+            else EventCopy(
+                calendarId = c.getLong(0), title = c.getString(1).orEmpty(), start = c.getLong(2),
+                end = if (c.isNull(3)) c.getLong(2) + 3_600_000 else c.getLong(3), timeZone = c.getString(4),
+                allDay = c.getInt(5) == 1, location = c.getString(6), notes = c.getString(7), rrule = c.getString(8),
+            )
+        } ?: return null
+        val reminders = mutableListOf<Int>()
+        context.contentResolver.query(
+            CalendarContract.Reminders.CONTENT_URI, arrayOf(CalendarContract.Reminders.MINUTES),
+            "${CalendarContract.Reminders.EVENT_ID} = ?", arrayOf(id.toString()), null,
+        )?.use { c -> while (c.moveToNext()) reminders += c.getInt(0) }
+        return EventCopy(copy.calendarId, copy.title, copy.start, copy.end, copy.timeZone, copy.allDay, copy.location, copy.notes, copy.rrule, reminders)
+    }
+
+    /** Undo of a delete: puts the event back (with a new id). */
+    fun restoreEvent(data: String): Long? = runCatching {
+        val e = kotlinx.serialization.json.Json.decodeFromString(EventCopy.serializer(), data)
+        val uri = context.contentResolver.insert(CalendarContract.Events.CONTENT_URI, ContentValues().apply {
+            put(CalendarContract.Events.CALENDAR_ID, e.calendarId)
+            put(CalendarContract.Events.TITLE, e.title)
+            put(CalendarContract.Events.DTSTART, e.start)
+            put(CalendarContract.Events.DTEND, e.end)
+            put(CalendarContract.Events.EVENT_TIMEZONE, e.timeZone ?: if (e.allDay) "UTC" else ZoneId.systemDefault().id)
+            put(CalendarContract.Events.ALL_DAY, if (e.allDay) 1 else 0)
+            e.location?.let { put(CalendarContract.Events.EVENT_LOCATION, it) }
+            e.notes?.let { put(CalendarContract.Events.DESCRIPTION, it) }
+            put(CalendarContract.Events.HAS_ALARM, if (e.reminders.isNotEmpty()) 1 else 0)
+        }) ?: return@runCatching null
+        val id = ContentUris.parseId(uri)
+        e.reminders.forEach { m ->
+            context.contentResolver.insert(CalendarContract.Reminders.CONTENT_URI, ContentValues().apply {
+                put(CalendarContract.Reminders.EVENT_ID, id)
+                put(CalendarContract.Reminders.MINUTES, m)
+                put(CalendarContract.Reminders.METHOD, CalendarContract.Reminders.METHOD_ALERT)
+            })
+        }
+        id
+    }.getOrNull()
 
     /** Undo from the chat card: removes an event this chat added. */
     fun deleteEvent(id: Long): Boolean = runCatching {
@@ -280,7 +427,9 @@ class PhoneTools(private val context: Context) {
 
     companion object {
         val CALENDAR_PERMISSIONS = arrayOf(Manifest.permission.READ_CALENDAR, Manifest.permission.WRITE_CALENDAR)
-        val NAMES = setOf("set_alarm", "set_timer", "add_calendar_event", "list_calendar_events")
+        val NAMES = setOf(
+            "set_alarm", "set_timer", "turn_off_alarm", "add_calendar_event", "list_calendar_events", "delete_calendar_event",
+        )
         private const val MAX_EVENTS = 60
         private const val NO_CALENDAR = "Pocket AI isn't allowed to use the calendar (the user declined, or wasn't in the app " +
             "to be asked). Tell the user to allow Calendar for Pocket AI and try again."
@@ -291,14 +440,17 @@ class PhoneTools(private val context: Context) {
         private val CLOCK = DateTimeFormatter.ofPattern("EEEE d MMMM yyyy, HH:mm", Locale.US)
 
         /** Added to the system prompt when phone actions are on. */
-        const val PROMPT = "\nYou can also do simple things on the user's phone: set_alarm, set_timer, add_calendar_event " +
-            "and list_calendar_events. When the user asks for an alarm, a timer, a reminder or a calendar entry, do it " +
+        const val PROMPT = "\nYou can also do simple things on the user's phone: set_alarm, set_timer, turn_off_alarm, " +
+            "add_calendar_event, list_calendar_events and delete_calendar_event. When the user asks for an alarm, a timer, a reminder or a calendar entry, do it " +
             "with the tool instead of explaining how; a reminder is a calendar event with a reminder. Look at the calendar " +
             "before saying when the user is free or busy. Turn relative days ('Thursday', 'tomorrow') into real dates from " +
             "today's date. You don't know the current clock time, so for times counted from now ('in 20 minutes') use " +
             "in_minutes. If something you need is really unclear (which day, morning or evening), ask one short question " +
             "first; otherwise take the obvious reading. Don't ask for confirmation: afterwards say in one short sentence " +
-            "what you did with the exact day and time; the chat shows a card the user can undo."
+            "what you did with the exact day and time; the chat shows a card the user can undo. To remove or change an " +
+            "event, use its id (from when it was added, or list that day first); to change one, delete it and add the new " +
+            "version. Phone alarms have no date: only set one for a specific day if it's the next time that clock time " +
+            "comes round; never turn a one-off into a weekly alarm."
 
         fun parseTime(s: String): LocalTime {
             val m = Regex("""^\s*(\d{1,2})[:.h]?(\d{2})?\s*(am|pm|a\.m\.|p\.m\.)?\s*$""", RegexOption.IGNORE_CASE).find(s)
@@ -361,7 +513,7 @@ class PhoneTools(private val context: Context) {
 
         /** Opens the card's item: the event, the day in the calendar, or the Clock app. */
         fun openIntent(e: ToolEvent): Intent? = when (e.kind) {
-            "alarm" -> Intent(AlarmClock.ACTION_SHOW_ALARMS)
+            "alarm", "alarm_off" -> Intent(AlarmClock.ACTION_SHOW_ALARMS)
             "timer" -> if (android.os.Build.VERSION.SDK_INT >= 26) Intent(AlarmClock.ACTION_SHOW_TIMERS) else null
             "calendar" -> e.ref?.let { Intent(Intent.ACTION_VIEW, ContentUris.withAppendedId(CalendarContract.Events.CONTENT_URI, it)) }
             "agenda" -> e.ref?.let {
@@ -387,8 +539,14 @@ class PhoneTools(private val context: Context) {
             fun kotlinx.serialization.json.JsonObjectBuilder.p(name: String, type: String, description: String) =
                 putJsonObject(name) { put("type", type); put("description", description) }
 
-            tool("set_alarm", "Set an alarm in the phone's Clock app.", emptyList()) {
+            tool(
+                "set_alarm",
+                "Set an alarm in the phone's Clock app. Alarms have no date: a one-time alarm rings the next time the clock " +
+                    "shows that time (within 24 hours).",
+                emptyList(),
+            ) {
                 p("time", "string", "Alarm time, HH:MM 24-hour (e.g. \"06:30\").")
+                p("date", "string", "The day the user wants it, YYYY-MM-DD, when they name one; it's refused unless it's the next time that time comes round.")
                 p("in_minutes", "integer", "Instead of time: ring this many minutes from now.")
                 p("label", "string", "Optional short label.")
                 putJsonObject("days") {
@@ -396,6 +554,14 @@ class PhoneTools(private val context: Context) {
                     putJsonObject("items") { put("type", "string") }
                     put("description", "Repeat days, e.g. [\"mon\",\"tue\",\"wed\",\"thu\",\"fri\"]. Omit for a one-time alarm.")
                 }
+            }
+            tool(
+                "turn_off_alarm",
+                "Turn off an alarm in the Clock app (Android lets apps switch alarms off, not delete them).",
+                emptyList(),
+            ) {
+                p("time", "string", "The alarm's time, HH:MM 24-hour.")
+                p("label", "string", "Or the alarm's label.")
             }
             tool("set_timer", "Start a countdown timer in the phone's Clock app.", emptyList()) {
                 p("minutes", "integer", "Minutes.")
@@ -416,6 +582,14 @@ class PhoneTools(private val context: Context) {
                 p("location", "string", "Optional place.")
                 p("notes", "string", "Optional notes.")
                 p("reminder_minutes", "integer", "Notify this many minutes before (0 = at the start). Default 30 for timed events.")
+            }
+            tool(
+                "delete_calendar_event",
+                "Delete one calendar event by its id (from add_calendar_event's result or list_calendar_events). The user " +
+                    "can undo it from the chat. Repeating events can't be deleted here.",
+                listOf("event_id"),
+            ) {
+                p("event_id", "integer", "The event's id.")
             }
             tool("list_calendar_events", "Read the user's calendar for a day or a range of days. The result starts with the current time.", emptyList()) {
                 p("from", "string", "First day, YYYY-MM-DD. Default today.")

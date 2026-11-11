@@ -128,17 +128,29 @@ class ChatViewModel(private val app: Application) : AndroidViewModel(app) {
 
     /** Undo on a calendar card: removes the event this chat added. */
     fun undoPhoneAction(convId: String, msgId: String, ev: ToolEvent) {
-        if (ev.kind != "calendar" || ev.undone) return
-        val id = ev.ref ?: return
+        if (ev.undone) return
         viewModelScope.launch(Dispatchers.IO) {
-            if (phone.deleteEvent(id)) {
+            val ok = when (ev.kind) {
+                "calendar" -> ev.ref?.let { phone.deleteEvent(it) } == true
+                "calendar_deleted" -> ev.data?.let { phone.restoreEvent(it) } != null
+                else -> return@launch
+            }
+            if (ok) {
                 updateMsg(convId, msgId) { m -> m.copy(toolEvents = m.toolEvents.map { if (it.id == ev.id) it.copy(undone = true) else it }) }
                 persist(convId)
-                notice("Removed from your calendar")
+                notice(if (ev.kind == "calendar") "Removed from your calendar" else "Put back in your calendar")
             } else {
-                notice("Couldn't remove it (it may already be deleted)")
+                notice(if (ev.kind == "calendar") "Couldn't remove it (it may already be deleted)" else "Couldn't put it back")
             }
         }
+    }
+
+    /** An event deleted by the AI: earlier "Added" cards for it in this chat lose their Undo. */
+    private fun markEventGone(convId: String, eventId: Long) = updateConv(convId) { c ->
+        c.copy(messages = c.messages.map { m ->
+            if (m.toolEvents.none { it.kind == "calendar" && it.ref == eventId }) m
+            else m.copy(toolEvents = m.toolEvents.map { if (it.kind == "calendar" && it.ref == eventId) it.copy(ref = null) else it })
+        })
     }
 
     /** Makes this address/key/model the one chats use, without saving it as a named API. */
@@ -786,7 +798,10 @@ class ChatViewModel(private val app: Application) : AndroidViewModel(app) {
             in PhoneTools.NAMES -> {
                 setStatus(convId, if (tc.name == "list_calendar_events") "Checking your calendar…" else "Working on your phone…")
                 val out = withContext(Dispatchers.IO) { phone.run(tc.name, args) { (app as PocketApp).visible } }
-                out.event?.let { ev -> updateMsg(convId, msgId) { it.copy(toolEvents = it.toolEvents + ev) } }
+                out.event?.let { ev ->
+                    if (ev.kind == "calendar_deleted") ev.ref?.let { markEventGone(convId, it) }
+                    updateMsg(convId, msgId) { it.copy(toolEvents = it.toolEvents + ev) }
+                }
                 out.text
             }
             else -> "Error: unknown tool ${tc.name}."
@@ -922,6 +937,13 @@ class ChatViewModel(private val app: Application) : AndroidViewModel(app) {
                 "assistant" -> {
                     if (m.text.isBlank() && m.apiTrail.isEmpty()) return@forEachIndexed
                     var content = (m.finalContent ?: m.text).ifBlank { "(no reply)" }
+                    // Undo taps happen outside the conversation; without this the AI would think they still stand.
+                    m.toolEvents.filter { it.undone && it.kind == "calendar_deleted" }.forEach {
+                        content += "\n\n(The user tapped Undo: \"${it.label}\" was put back in the calendar, with a new id.)"
+                    }
+                    m.toolEvents.filter { it.undone && it.kind == "calendar" }.forEach {
+                        content += "\n\n(The user tapped Undo: \"${it.label}\" was removed from the calendar again.)"
+                    }
                     if (i == lastAssistant && m.apiTrail.isNotEmpty()) {
                         out.addAll(m.apiTrail)
                         // Re-sent web results count as "web" in the breakdown.

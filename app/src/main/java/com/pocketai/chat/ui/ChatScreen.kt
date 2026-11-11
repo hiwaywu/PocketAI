@@ -121,6 +121,8 @@ import com.pocketai.chat.data.ModelRates
 import com.pocketai.chat.data.ToolEvent
 import com.pocketai.chat.phone.PhoneTools
 import androidx.compose.material.icons.outlined.Alarm
+import androidx.compose.material.icons.outlined.AlarmOff
+import androidx.compose.material.icons.outlined.EventBusy
 import androidx.compose.material.icons.outlined.Event
 import androidx.compose.material.icons.outlined.Timer
 import androidx.compose.ui.text.style.TextDecoration
@@ -698,7 +700,7 @@ private fun ImageViewer(path: String, onDismiss: () -> Unit) {
     }
 }
 
-private val PHONE_KINDS = setOf("alarm", "timer", "calendar", "agenda")
+private val PHONE_KINDS = setOf("alarm", "alarm_off", "timer", "calendar", "calendar_deleted", "agenda")
 
 /** A phone action the AI took (2.20): tap opens it in Clock/Calendar; calendar events have Undo. */
 @Composable
@@ -716,6 +718,8 @@ private fun PhoneActionCard(e: ToolEvent, onUndo: (ToolEvent) -> Unit) {
             Icon(
                 when (e.kind) {
                     "alarm" -> Icons.Outlined.Alarm
+                    "alarm_off" -> Icons.Outlined.AlarmOff
+                    "calendar_deleted" -> Icons.Outlined.EventBusy
                     "timer" -> Icons.Outlined.Timer
                     else -> Icons.Outlined.Event
                 },
@@ -727,15 +731,16 @@ private fun PhoneActionCard(e: ToolEvent, onUndo: (ToolEvent) -> Unit) {
             Text(
                 when (e.kind) {
                     "calendar" -> (if (e.undone) "Removed: " else "Added: ") + e.label
+                    "calendar_deleted" -> (if (e.undone) "Put back: " else "Deleted: ") + e.label
                     "agenda" -> "Checked calendar: " + e.label
                     else -> e.label
                 },
                 style = MaterialTheme.typography.labelLarge,
                 color = MaterialTheme.colorScheme.onTertiaryContainer,
-                textDecoration = if (e.undone) TextDecoration.LineThrough else null,
+                textDecoration = if (e.undone && e.kind == "calendar") TextDecoration.LineThrough else null,
                 modifier = Modifier.weight(1f, fill = false).padding(vertical = 6.dp),
             )
-            if (e.kind == "calendar" && !e.undone && e.ref != null) {
+            if (!e.undone && ((e.kind == "calendar" && e.ref != null) || (e.kind == "calendar_deleted" && e.data != null))) {
                 TextButton(onClick = { onUndo(e) }) { Text("Undo") }
             } else {
                 Spacer(Modifier.width(8.dp))

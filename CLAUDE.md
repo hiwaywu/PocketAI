@@ -181,7 +181,12 @@ Emulator: any image works again (no native code since 2.2).
   visible). Each action is a `ToolEvent` card (kinds alarm/timer/calendar/agenda): tap opens Clock/Calendar,
   calendar cards have Undo (`ChatViewModel.undoPhoneAction`). Setting "Phone actions" (`AppSettings.phoneTools`).
   The model gets no clock time (caching), so the tools take `in_minutes` and results state the current time.
-  Untested on a device.
+  First device test (beam-free, Nov 11): adding an event and an alarm worked; "alarm 12pm that day" (Fri 13th) became a
+  weekly Friday alarm, and "remove both" had no tool. Now: `set_alarm` takes `date` and refuses one that isn't the next
+  time that clock time comes round (Clock alarms have no date; suggests a calendar reminder instead);
+  `turn_off_alarm` (DISMISS_ALARM by time or label — Android can't delete other apps' alarms; falls back to opening the
+  alarm list); `delete_calendar_event` by id (ids are in add/list results; repeating events refused; a copy goes on
+  the card so Undo restores it). Undo taps are added to the re-sent assistant text so the model knows.
 - `screen/ScreenOcr.kt` (2.20 test): when a screen gives <150 weighted chars to accessibility (the Reddit app gave
   0 on the Fold in 2.15–2.19), the button screenshots the app's window (`takeScreenshotOfWindow`, API 34+;
   `canTakeScreenshot` in ask_service.xml) and reads it with ML Kit text recognition (Play services' Chinese model,

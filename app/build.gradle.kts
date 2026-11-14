@@ -16,8 +16,8 @@ android {
         applicationId = "com.pocketai.chat"
         minSdk = 26
         targetSdk = 35
-        versionCode = 35
-        versionName = "2.20"
+        versionCode = 36
+        versionName = "2.21"
     }
 
     // One permanent release key so every build can install over the previous version without losing

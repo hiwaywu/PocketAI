@@ -30,6 +30,11 @@
         <intent>
             <action android:name="android.intent.action.SHOW_ALARMS" />
         </intent>
+        <!-- Other apps' text actions (Translate, Read aloud) for the selection menu in chats (ui/SelectionMenu.kt). -->
+        <intent>
+            <action android:name="android.intent.action.PROCESS_TEXT" />
+            <data android:mimeType="text/plain" />
+        </intent>
     </queries>
 
     <application

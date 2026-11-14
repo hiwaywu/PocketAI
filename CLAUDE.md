@@ -192,6 +192,13 @@ Emulator: any image works again (no native code since 2.2).
   `canTakeScreenshot` in ask_service.xml) and reads it with ML Kit text recognition (Play services' Chinese model,
   also reads English; `com.google.mlkit.vision.DEPENDENCIES=ocr_chinese`). The OCR blocks replace the pieces, so the
   Reddit-app path (title → whole thread) still runs. Logged as "ocr: …" in Details. Untested on a device.
+- `ui/SelectionMenu.kt` (2.21, owner: "Samsung Pass 100% removed", "web search has to be 1"): `SelectableText` wraps
+  every selectable reply (chat + panel) in `SelectionContainer(rememberSelectionState())`; the selection menu is
+  Compose's own (Translate/Read aloud/Samsung Pass/Ask Pocket AI were all PROCESS_TEXT items Compose adds). A filter
+  can drop but not reorder items, so all of Compose's items are dropped and ours re-added: Web search
+  (`webSearchRequest` → sent in that chat), Copy, Select all, then other apps' PROCESS_TEXT actions minus our own and
+  Samsung Pass (`isSamsungPass`). Side effect: no smart-selection actions ("Call" on a number). Checked with a
+  temporary Robolectric test (sdk 27: Robolectric's Magnifier crashes on 28+); not yet on the Fold.
 - `data/Rates.kt` — NT Media per-model usage multipliers (from its price list; its API doesn't expose
   them). `ReplyUsage.multiplier`/`billed` = tokens × multiplier, shown in chat, usage dialog/screen, model menu.
 - `data/Settings.kt` — `AppSettings` (saved API profiles, search engine/keys), stored as one AES-GCM

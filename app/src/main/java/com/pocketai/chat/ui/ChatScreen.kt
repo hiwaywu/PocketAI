@@ -36,7 +36,6 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
@@ -199,6 +198,7 @@ fun ChatScreen(
                                     onFollowUp = { vm.send(it) },
                                     modifier = Modifier.widthIn(max = 780.dp),
                                     onUndo = { vm.undoPhoneAction(conv.id, m.id, it) },
+                                    onWebSearch = { vm.send(webSearchRequest(it)) },
                                 )
                             }
                         }
@@ -434,6 +434,7 @@ internal fun AssistantMessage(
     onFollowUp: (String) -> Unit,
     modifier: Modifier,
     onUndo: (ToolEvent) -> Unit = {},
+    onWebSearch: ((String) -> Unit)? = null,
 ) {
     val clipboard = LocalClipboardManager.current
     var showUsage by remember { mutableStateOf(false) }
@@ -442,7 +443,7 @@ internal fun AssistantMessage(
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) { m.toolEvents.forEach { ToolEventRow(it, onUndo) } }
         }
         if (m.text.isNotBlank()) {
-            SelectionContainer { MarkdownText(m.text.trimEnd(), onLink) }
+            SelectableText(onWebSearch) { MarkdownText(m.text.trimEnd(), onLink) }
         }
         if (working && (m.text.isBlank() || status != null)) {
             Row(verticalAlignment = Alignment.CenterVertically) {

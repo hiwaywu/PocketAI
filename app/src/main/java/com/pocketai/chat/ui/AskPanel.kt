@@ -32,7 +32,6 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.OpenInNew
@@ -238,6 +237,7 @@ fun AskPanel(
                                     onFollowUp = {},
                                     modifier = Modifier,
                                     onUndo = { vm.undoPhoneAction(conv.id, m.id, it) },
+                                    onWebSearch = { ask(webSearchRequest(it)) },
                                 )
                             }
                         }
@@ -300,7 +300,7 @@ fun AskPanel(
                         Text(it, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
                         Spacer(Modifier.size(8.dp))
                     }
-                    SelectionContainer { Text(capture.text, style = MaterialTheme.typography.bodySmall) }
+                    SelectableText(onWebSearch = { ask(webSearchRequest(it)) }) { Text(capture.text, style = MaterialTheme.typography.bodySmall) }
                     capture.debug?.let {
                         Spacer(Modifier.size(10.dp))
                         Text("How it went: $it", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline)
